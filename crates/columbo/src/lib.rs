@@ -1,12 +1,166 @@
-pub fn add(left: u64, right: u64) -> u64 { left + right }
+use std::{collections::HashMap, fmt, sync::Mutex};
 
-#[cfg(test)]
-mod tests {
-  use super::*;
+use futures::StreamExt;
+use tokio::task::JoinHandle;
+use tokio_stream::wrappers::ReceiverStream;
 
-  #[test]
-  fn it_works() {
-    let result = add(2, 2);
-    assert_eq!(result, 4);
+use self::format::{
+  SuspenseJoinError, SuspensePlaceholder, SuspenseReplacement,
+};
+
+type Id = ulid::Ulid;
+
+pub struct SuspenseContext {
+  map: Mutex<HashMap<Id, JoinHandle<String>>>,
+}
+
+impl SuspenseContext {
+  pub fn suspend<F>(&self, future: F, placeholder_inner: String) -> Suspense
+  where
+    F: Future<Output = String> + Send + 'static,
+  {
+    let id = Id::new();
+    let handle = tokio::spawn(future);
+    {
+      let mut lock = self.map.lock().expect("columbo mutex was poisoned");
+      lock.insert(id, handle);
+    }
+
+    Suspense::new(id, placeholder_inner)
+  }
+
+  pub fn into_stream(
+    self,
+    body: String,
+  ) -> Box<dyn futures::Stream<Item = String>> {
+    // start the stream with the main body
+    let stream = futures::stream::once(async move { body });
+
+    let map = self.map.into_inner().expect("columbo mutex was poisoned");
+    // return early if no suspense
+    if map.is_empty() {
+      return Box::new(stream);
+    }
+
+    let (tx, rx) = tokio::sync::mpsc::channel(16);
+    let stream = stream.chain(ReceiverStream::new(rx));
+
+    // send the output of each suspense as it joins
+    for (id, handle) in map {
+      let tx = tx.clone();
+      tokio::spawn(async move {
+        // get the replacement content, or an error if JoinError
+        let replacement_content = match handle.await {
+          Ok(c) => c,
+          Err(e) => SuspenseJoinError { join_error: e }.to_string(),
+        };
+        let content = SuspenseReplacement {
+          id:                &id,
+          replacement_inner: &replacement_content,
+        }
+        .to_string();
+
+        let _ = tx.send(content).await;
+      });
+    }
+
+    Box::new(stream)
+  }
+}
+
+pub struct Suspense {
+  id:                Id,
+  placeholder_inner: String,
+}
+
+impl Suspense {
+  fn new(id: Id, placeholder_inner: String) -> Self {
+    Suspense {
+      id,
+      placeholder_inner,
+    }
+  }
+
+  pub fn id(&self) -> Id { self.id }
+
+  pub fn placeholder_html(&self) -> String { self.to_string() }
+}
+
+impl fmt::Display for Suspense {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    let formatter = SuspensePlaceholder {
+      id:                &self.id,
+      placeholder_inner: &self.placeholder_inner,
+    };
+    formatter.fmt(f)
+  }
+}
+
+mod format {
+  use std::fmt;
+
+  use tokio::task::JoinError;
+
+  use crate::Id;
+
+  pub(crate) struct SuspensePlaceholder<'a> {
+    pub id:                &'a Id,
+    pub placeholder_inner: &'a str,
+  }
+
+  impl<'a> fmt::Display for SuspensePlaceholder<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+      const DISPLAY_CONTENTS_STYLE: &str = r#"{display: contents;}"#;
+      write!(
+        f,
+        r#"<div data-columbo-p-id="{id}" style="{DISPLAY_CONTENTS_STYLE}">{inner}</div>"#,
+        id = self.id,
+        inner = self.placeholder_inner
+      )
+    }
+  }
+
+  pub(crate) struct SuspenseReplacement<'a> {
+    pub id:                &'a Id,
+    pub replacement_inner: &'a str,
+  }
+
+  impl<'a> fmt::Display for SuspenseReplacement<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+      write!(
+        f,
+        r#"<template data-columbo-r-id="{id}">{replacement}</template>
+         <script>
+           (function() {{
+             const t = document.querySelector('[data-columbo-p-id="{id}"]');
+             const r = document.querySelector('[data-columbo-r-id="{id}"]');
+             if (t && r) {{
+               t.replaceWith(r.content.cloneNode(true));
+             }}
+           }})();
+         </script>"#,
+        id = self.id,
+        replacement = self.replacement_inner
+      )
+    }
+  }
+
+  pub(crate) struct SuspenseJoinError {
+    pub join_error: JoinError,
+  }
+
+  impl fmt::Display for SuspenseJoinError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+      write!(
+        f,
+        r#"<div style="font-family: monospace; padding: 20px; background: #ffe6e6; color: #000; border: 2px solid #c00;">
+        <h1 style="color: #c00; font-size: 18px; margin: 0 0 10px 0;">Columbo Task JoinError</h1>
+        <p style="margin: 10px 0;">Columbo could not swap in a suspended response because the joining the suspended task failed.</p>
+        <h2 style="font-size: 16px; margin: 20px 0 10px 0;">Error:</h2>
+        <pre style="background: #f5f5f5; padding: 10px; overflow: auto; border: 1px solid #ccc; font-size: 12px;">{error}</pre>
+    </div>"#,
+        error = self.join_error
+      )
+    }
   }
 }

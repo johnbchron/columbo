@@ -20,7 +20,7 @@
       });
     in {
       devShell = pkgs.devshell.mkShell {
-        packages = [ toolchain ];
+        packages = [ toolchain pkgs.gcc ];
         motd = "\n  Welcome to the {2}columbo{reset} shell.\n";
       };
     });
