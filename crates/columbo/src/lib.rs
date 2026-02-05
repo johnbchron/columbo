@@ -155,7 +155,7 @@ mod format {
         f,
         r#"<div style="font-family: monospace; padding: 20px; background: #ffe6e6; color: #000; border: 2px solid #c00;">
         <h1 style="color: #c00; font-size: 18px; margin: 0 0 10px 0;">Columbo Task JoinError</h1>
-        <p style="margin: 10px 0;">Columbo could not swap in a suspended response because the joining the suspended task failed.</p>
+        <p style="margin: 10px 0;">Columbo could not swap in a suspended response because joining the suspended task failed.</p>
         <h2 style="font-size: 16px; margin: 20px 0 10px 0;">Error:</h2>
         <pre style="background: #f5f5f5; padding: 10px; overflow: auto; border: 1px solid #ccc; font-size: 12px;">{error}</pre>
     </div>"#,
