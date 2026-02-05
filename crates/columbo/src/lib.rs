@@ -1,5 +1,6 @@
-use std::{collections::HashMap, fmt, sync::Mutex};
+use std::{collections::HashMap, fmt, pin::Pin, sync::Mutex};
 
+use bytes::Bytes;
 use futures::StreamExt;
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReceiverStream;
@@ -39,18 +40,26 @@ impl SuspenseContext {
   pub fn into_stream(
     self,
     body: String,
-  ) -> Box<dyn futures::Stream<Item = String>> {
+  ) -> Pin<
+    Box<
+      dyn futures::Stream<Item = Result<Bytes, std::io::Error>>
+        + Send
+        + Sync
+        + 'static,
+    >,
+  > {
     // start the stream with the main body
-    let stream = futures::stream::once(async move { body });
+    let stream = futures::stream::once(async move { Ok(Bytes::from(body)) });
 
     let map = self.map.into_inner().expect("columbo mutex was poisoned");
     // return early if no suspense
     if map.is_empty() {
-      return Box::new(stream);
+      return Box::pin(stream);
     }
 
     let (tx, rx) = tokio::sync::mpsc::channel(16);
-    let stream = stream.chain(ReceiverStream::new(rx));
+    let stream =
+      stream.chain(ReceiverStream::new(rx).map(|s| Ok(Bytes::from(s))));
 
     // send the output of each suspense as it joins
     for (id, handle) in map {
@@ -71,7 +80,7 @@ impl SuspenseContext {
       });
     }
 
-    Box::new(stream)
+    Box::pin(stream)
   }
 }
 
