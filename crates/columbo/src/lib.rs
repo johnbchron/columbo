@@ -135,7 +135,7 @@ mod format {
              const t = document.querySelector('[data-columbo-p-id="{id}"]');
              const r = document.querySelector('[data-columbo-r-id="{id}"]');
              if (t && r) {{
-               t.replaceWith(r.content.cloneNode(true));
+               t.replaceWith(...r.content.childNodes);
              }}
            }})();
          </script>"#,
