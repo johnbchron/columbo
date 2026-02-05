@@ -10,11 +10,18 @@ use self::format::{
 
 type Id = ulid::Ulid;
 
+#[derive(Default)]
 pub struct SuspenseContext {
   map: Mutex<HashMap<Id, JoinHandle<String>>>,
 }
 
 impl SuspenseContext {
+  pub fn new() -> Self {
+    SuspenseContext {
+      map: Mutex::new(HashMap::new()),
+    }
+  }
+
   pub fn suspend<F>(&self, future: F, placeholder_inner: String) -> Suspense
   where
     F: Future<Output = String> + Send + 'static,
