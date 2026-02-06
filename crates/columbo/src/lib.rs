@@ -3,12 +3,13 @@
 //!
 //! Called `columbo` because Columbo always said, "And another thing..."
 
-use std::{collections::HashMap, fmt, pin::Pin, sync::Mutex};
+use std::{
+  collections::HashMap, convert::identity, fmt, pin::Pin, sync::Mutex,
+};
 
 use bytes::Bytes;
-use futures::{FutureExt, StreamExt};
+use futures::{FutureExt, StreamExt, stream::FuturesUnordered};
 use tokio::task::JoinHandle;
-use tokio_stream::wrappers::ReceiverStream;
 
 use self::format::{
   SuspenseJoinError, SuspensePlaceholder, SuspenseReplacement,
@@ -64,35 +65,32 @@ impl SuspenseContext {
     let map = std::mem::take(&mut self.map)
       .into_inner()
       .expect("columbo mutex was poisoned");
+
     // return early if no suspense
     if map.is_empty() {
       return Box::pin(stream);
     }
 
-    let (tx, rx) = tokio::sync::mpsc::channel(16);
+    let futures: FuturesUnordered<_> = map
+      .into_iter()
+      .map(|(id, handle)| async move {
+        let replacement_content = handle.await.map_or_else(
+          |e| SuspenseJoinError { join_error: e }.to_string(),
+          identity,
+        );
 
-    // send the output of each suspense as it joins
-    for (id, handle) in map {
-      let tx = tx.clone();
-      tokio::spawn(async move {
-        // get the replacement content, or an error if JoinError
-        let replacement_content = match handle.await {
-          Ok(c) => c,
-          Err(e) => SuspenseJoinError { join_error: e }.to_string(),
-        };
-        let content = SuspenseReplacement {
-          id:                &id,
-          replacement_inner: &replacement_content,
-        }
-        .to_string();
+        Bytes::from(
+          SuspenseReplacement {
+            id:                &id,
+            replacement_inner: &replacement_content,
+          }
+          .to_string(),
+        )
+      })
+      .collect();
 
-        let _ = tx.send(content).await;
-      });
-    }
-
-    // must occur after all tasks have spawned to avoid ending early
-    let stream =
-      stream.chain(ReceiverStream::new(rx).map(|s| Ok(Bytes::from(s))));
+    let suspense_stream = futures.map(Ok);
+    let stream = stream.chain(suspense_stream);
 
     Box::pin(stream)
   }
