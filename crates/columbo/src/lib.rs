@@ -139,7 +139,7 @@ mod format {
       const DISPLAY_CONTENTS_STYLE: &str = r#"{display: contents;}"#;
       write!(
         f,
-        r#"<div data-columbo-p-id="{id}" style="{DISPLAY_CONTENTS_STYLE}">{inner}</div>"#,
+        r#"<span data-columbo-p-id="{id}" style="{DISPLAY_CONTENTS_STYLE}">{inner}</span>"#,
         id = self.id,
         inner = self.placeholder_inner
       )
