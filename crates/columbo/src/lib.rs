@@ -173,8 +173,8 @@ mod format {
            (function() {{
              const t = document.querySelector('[data-columbo-p-id="{id}"]');
              const r = document.querySelector('[data-columbo-r-id="{id}"]');
-             if (t && r) {{
-               t.replaceWith(...r.content.childNodes);
+             if (t && r && t.parentNode) {{
+               t.parentNode.replaceChild(r.content, t);
              }}
            }})();
          </script>"#,
