@@ -6,7 +6,7 @@
 use std::{collections::HashMap, fmt, pin::Pin, sync::Mutex};
 
 use bytes::Bytes;
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -31,12 +31,13 @@ impl SuspenseContext {
 
   /// Suspends a future. The placeholder is sent immediately, and the future
   /// output is streamed and then replaces the placeholder in the browser.
-  pub fn suspend<F>(&self, future: F, placeholder_inner: String) -> Suspense
+  pub fn suspend<F, P>(&self, future: F, placeholder_inner: String) -> Suspense
   where
-    F: Future<Output = String> + Send + 'static,
+    F: Future<Output = P> + Send + 'static,
+    P: Into<String> + Send,
   {
     let id = Id::new();
-    let handle = tokio::spawn(future);
+    let handle = tokio::spawn(future.map(|o| o.into()));
     {
       let mut lock = self.map.lock().expect("columbo mutex was poisoned");
       lock.insert(id, handle);

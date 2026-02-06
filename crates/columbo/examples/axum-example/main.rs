@@ -14,7 +14,7 @@ async fn suspended_handler() -> impl IntoResponse {
   let long_suspend = ctx.suspend(
     async move {
       tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-      "I waited 5 seconds!".into()
+      "I waited 5 seconds!"
     },
     "Loading...".into(),
   );
