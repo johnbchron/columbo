@@ -48,7 +48,7 @@ impl SuspenseContext {
 
   /// Turns the context into a stream for sending as a response.
   pub fn into_stream(
-    self,
+    mut self,
     body: String,
   ) -> Pin<
     Box<
@@ -61,7 +61,9 @@ impl SuspenseContext {
     // start the stream with the main body
     let stream = futures::stream::once(async move { Ok(Bytes::from(body)) });
 
-    let map = self.map.into_inner().expect("columbo mutex was poisoned");
+    let map = std::mem::take(&mut self.map)
+      .into_inner()
+      .expect("columbo mutex was poisoned");
     // return early if no suspense
     if map.is_empty() {
       return Box::pin(stream);
@@ -93,6 +95,14 @@ impl SuspenseContext {
       stream.chain(ReceiverStream::new(rx).map(|s| Ok(Bytes::from(s))));
 
     Box::pin(stream)
+  }
+}
+
+impl Drop for SuspenseContext {
+  fn drop(&mut self) {
+    for (_, jh) in self.map.get_mut().unwrap().drain() {
+      jh.abort();
+    }
   }
 }
 
@@ -191,5 +201,71 @@ mod format {
         error = self.join_error
       )
     }
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use std::{
+    sync::{
+      Arc,
+      atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+  };
+
+  use super::*;
+
+  #[tokio::test]
+  async fn test_drop_aborts_pending_tasks() {
+    // Create a flag to track if the future was cancelled
+    let was_aborted = Arc::new(AtomicBool::new(false));
+    let was_aborted_clone = was_aborted.clone();
+
+    // Create a suspense context and suspend a long-running future
+    let ctx = SuspenseContext::new();
+
+    let _suspense = ctx.suspend(
+      async move {
+        tokio::select! {
+          _ = tokio::time::sleep(Duration::from_secs(10)) => {
+            "completed".to_string()
+          }
+          _ = tokio::task::yield_now() => {
+            // If we get cancelled, the task will be aborted
+            // and this won't execute, but we check via drop guard below
+            "yielded".to_string()
+          }
+        }
+      },
+      "Loading...".to_string(),
+    );
+
+    // Spawn a task that will detect if it gets aborted
+    {
+      let mut lock = ctx.map.lock().unwrap();
+      if let Some((_, handle)) = lock.iter_mut().next() {
+        let handle_clone = handle.abort_handle();
+        let was_aborted_for_guard = was_aborted_clone.clone();
+        tokio::spawn(async move {
+          tokio::time::sleep(Duration::from_millis(100)).await;
+          if handle_clone.is_finished() {
+            was_aborted_for_guard.store(true, Ordering::SeqCst);
+          }
+        });
+      }
+    }
+
+    // Drop the context - this should abort all tasks
+    drop(ctx);
+
+    // Give a moment for the abort to propagate
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    // Verify the task was aborted
+    assert!(
+      was_aborted.load(Ordering::SeqCst),
+      "Task should have been aborted when SuspenseContext was dropped"
+    );
   }
 }
