@@ -4,19 +4,32 @@ use axum::{
   response::{IntoResponse, Response},
   routing::get,
 };
-use columbo::SuspenseContext;
 use maud::{DOCTYPE, PreEscaped};
 
 #[axum::debug_handler]
 async fn suspended_handler() -> impl IntoResponse {
-  let ctx = SuspenseContext::new();
+  let (ctx, resp) = columbo::new();
 
   let long_suspend = ctx.suspend(
-    async move {
+    |ctx| async move {
       tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-      "I waited 5 seconds!"
+
+      let longer_suspend = ctx.suspend(
+        |_ctx| async move {
+          tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+          "I waited 3 seconds!"
+        },
+        "[loading]".into(),
+      );
+
+      maud::html! {
+        div {
+          "I waited 2 seconds! But there's more: "
+          (PreEscaped(longer_suspend.to_string()))
+        }
+      }
     },
-    "Loading...".into(),
+    "[loading]".into(),
   );
 
   let body = maud::html! {
@@ -33,7 +46,7 @@ async fn suspended_handler() -> impl IntoResponse {
   }
   .into_string();
 
-  let body = Body::from_stream(ctx.into_stream(body));
+  let body = Body::from_stream(resp.into_stream(body));
   Response::builder()
     .header("Content-Type", "text/html; charset=utf-8")
     .header("Transfer-Encoding", "chunked")

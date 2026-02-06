@@ -3,13 +3,12 @@
 //!
 //! Called `columbo` because Columbo always said, "And another thing..."
 
-use std::{
-  collections::HashMap, convert::identity, fmt, pin::Pin, sync::Mutex,
-};
+use std::{convert::identity, fmt, pin::Pin};
 
 use bytes::Bytes;
-use futures::{FutureExt, StreamExt, stream::FuturesUnordered};
-use tokio::task::JoinHandle;
+use futures::{StreamExt, stream::once};
+use tokio::{sync::mpsc, task::JoinHandle};
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use self::format::{
   SuspenseJoinError, SuspensePlaceholder, SuspenseReplacement,
@@ -17,39 +16,54 @@ use self::format::{
 
 type Id = ulid::Ulid;
 
+/// Creates a new [`SuspenseContext`] and [`SuspendedResponse`]. The context is
+/// for suspending futures, and the response turns into an output stream.
+pub fn new() -> (SuspenseContext, SuspendedResponse) {
+  let (tx, rx) = mpsc::unbounded_channel();
+  (SuspenseContext { tx }, SuspendedResponse { rx })
+}
+
 /// The context with which you can create suspense boundaries for futures.
-#[derive(Default)]
+#[derive(Clone)]
 pub struct SuspenseContext {
-  map: Mutex<HashMap<Id, JoinHandle<String>>>,
+  tx: mpsc::UnboundedSender<(Id, JoinHandle<String>)>,
 }
 
 impl SuspenseContext {
-  pub fn new() -> Self {
-    SuspenseContext {
-      map: Mutex::new(HashMap::new()),
-    }
-  }
-
   /// Suspends a future. The placeholder is sent immediately, and the future
   /// output is streamed and then replaces the placeholder in the browser.
-  pub fn suspend<F, P>(&self, future: F, placeholder_inner: String) -> Suspense
+  pub fn suspend<F, Fut, P>(
+    &self,
+    future: F,
+    placeholder_inner: String,
+  ) -> Suspense
   where
-    F: Future<Output = P> + Send + 'static,
-    P: Into<String> + Send,
+    F: FnOnce(SuspenseContext) -> Fut + Send + 'static,
+    Fut: Future<Output = P> + Send + 'static,
+    P: Send,
+    String: From<P>,
   {
     let id = Id::new();
-    let handle = tokio::spawn(future.map(|o| o.into()));
-    {
-      let mut lock = self.map.lock().expect("columbo mutex was poisoned");
-      lock.insert(id, handle);
-    }
+    let ctx = self.clone();
+    let handle = tokio::spawn(async move {
+      let output = future(ctx).await;
+      String::from(output)
+    });
+
+    let _ = self.tx.send((id, handle));
 
     Suspense::new(id, placeholder_inner)
   }
+}
 
-  /// Turns the context into a stream for sending as a response.
+pub struct SuspendedResponse {
+  rx: mpsc::UnboundedReceiver<(Id, JoinHandle<String>)>,
+}
+
+impl SuspendedResponse {
+  /// Turns the `SuspendedResponse` into a stream for sending as a response.
   pub fn into_stream(
-    mut self,
+    self,
     body: String,
   ) -> Pin<
     Box<
@@ -59,48 +73,23 @@ impl SuspenseContext {
         + 'static,
     >,
   > {
-    // start the stream with the main body
-    let stream = futures::stream::once(async move { Ok(Bytes::from(body)) });
+    let html_replacement = move |(id, jh): (Id, JoinHandle<String>)| async move {
+      Ok(Bytes::from(
+        SuspenseReplacement {
+          id:                &id,
+          replacement_inner: &jh.await.map_or_else(
+            |e| SuspenseJoinError { join_error: e }.to_string(),
+            identity,
+          ),
+        }
+        .to_string(),
+      ))
+    };
 
-    let map = std::mem::take(&mut self.map)
-      .into_inner()
-      .expect("columbo mutex was poisoned");
+    let recv_stream =
+      UnboundedReceiverStream::new(self.rx).then(html_replacement);
 
-    // return early if no suspense
-    if map.is_empty() {
-      return Box::pin(stream);
-    }
-
-    let futures: FuturesUnordered<_> = map
-      .into_iter()
-      .map(|(id, handle)| async move {
-        let replacement_content = handle.await.map_or_else(
-          |e| SuspenseJoinError { join_error: e }.to_string(),
-          identity,
-        );
-
-        Bytes::from(
-          SuspenseReplacement {
-            id:                &id,
-            replacement_inner: &replacement_content,
-          }
-          .to_string(),
-        )
-      })
-      .collect();
-
-    let suspense_stream = futures.map(Ok);
-    let stream = stream.chain(suspense_stream);
-
-    Box::pin(stream)
-  }
-}
-
-impl Drop for SuspenseContext {
-  fn drop(&mut self) {
-    for (_, jh) in self.map.get_mut().unwrap().drain() {
-      jh.abort();
-    }
+    Box::pin(once(async move { Ok(Bytes::from(body)) }).chain(recv_stream))
   }
 }
 
@@ -199,71 +188,5 @@ mod format {
         error = self.join_error
       )
     }
-  }
-}
-
-#[cfg(test)]
-mod tests {
-  use std::{
-    sync::{
-      Arc,
-      atomic::{AtomicBool, Ordering},
-    },
-    time::Duration,
-  };
-
-  use super::*;
-
-  #[tokio::test]
-  async fn test_drop_aborts_pending_tasks() {
-    // Create a flag to track if the future was cancelled
-    let was_aborted = Arc::new(AtomicBool::new(false));
-    let was_aborted_clone = was_aborted.clone();
-
-    // Create a suspense context and suspend a long-running future
-    let ctx = SuspenseContext::new();
-
-    let _suspense = ctx.suspend(
-      async move {
-        tokio::select! {
-          _ = tokio::time::sleep(Duration::from_secs(10)) => {
-            "completed".to_string()
-          }
-          _ = tokio::task::yield_now() => {
-            // If we get cancelled, the task will be aborted
-            // and this won't execute, but we check via drop guard below
-            "yielded".to_string()
-          }
-        }
-      },
-      "Loading...".to_string(),
-    );
-
-    // Spawn a task that will detect if it gets aborted
-    {
-      let mut lock = ctx.map.lock().unwrap();
-      if let Some((_, handle)) = lock.iter_mut().next() {
-        let handle_clone = handle.abort_handle();
-        let was_aborted_for_guard = was_aborted_clone.clone();
-        tokio::spawn(async move {
-          tokio::time::sleep(Duration::from_millis(100)).await;
-          if handle_clone.is_finished() {
-            was_aborted_for_guard.store(true, Ordering::SeqCst);
-          }
-        });
-      }
-    }
-
-    // Drop the context - this should abort all tasks
-    drop(ctx);
-
-    // Give a moment for the abort to propagate
-    tokio::time::sleep(Duration::from_millis(150)).await;
-
-    // Verify the task was aborted
-    assert!(
-      was_aborted.load(Ordering::SeqCst),
-      "Task should have been aborted when SuspenseContext was dropped"
-    );
   }
 }
