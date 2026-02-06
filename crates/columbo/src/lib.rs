@@ -67,8 +67,6 @@ impl SuspenseContext {
     }
 
     let (tx, rx) = tokio::sync::mpsc::channel(16);
-    let stream =
-      stream.chain(ReceiverStream::new(rx).map(|s| Ok(Bytes::from(s))));
 
     // send the output of each suspense as it joins
     for (id, handle) in map {
@@ -88,6 +86,10 @@ impl SuspenseContext {
         let _ = tx.send(content).await;
       });
     }
+
+    // must occur after all tasks have spawned to avoid ending early
+    let stream =
+      stream.chain(ReceiverStream::new(rx).map(|s| Ok(Bytes::from(s))));
 
     Box::pin(stream)
   }
