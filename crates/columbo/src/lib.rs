@@ -1,3 +1,8 @@
+//! Provides SSR suspense capabilities. Render a placeholder for a future, and
+//! stream the replacement elements.
+//!
+//! Called `columbo` because Columbo always said, "And another thing..."
+
 use std::{collections::HashMap, fmt, pin::Pin, sync::Mutex};
 
 use bytes::Bytes;
@@ -11,6 +16,7 @@ use self::format::{
 
 type Id = ulid::Ulid;
 
+/// The context with which you can create suspense boundaries for futures.
 #[derive(Default)]
 pub struct SuspenseContext {
   map: Mutex<HashMap<Id, JoinHandle<String>>>,
@@ -23,6 +29,8 @@ impl SuspenseContext {
     }
   }
 
+  /// Suspends a future. The placeholder is sent immediately, and the future
+  /// output is streamed and then replaces the placeholder in the browser.
   pub fn suspend<F>(&self, future: F, placeholder_inner: String) -> Suspense
   where
     F: Future<Output = String> + Send + 'static,
@@ -37,6 +45,7 @@ impl SuspenseContext {
     Suspense::new(id, placeholder_inner)
   }
 
+  /// Turns the context into a stream for sending as a response.
   pub fn into_stream(
     self,
     body: String,
@@ -84,6 +93,7 @@ impl SuspenseContext {
   }
 }
 
+/// A suspended future. Can be interpolated into strings as the placeholder.
 pub struct Suspense {
   id:                Id,
   placeholder_inner: String,
