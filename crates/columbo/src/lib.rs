@@ -230,6 +230,10 @@ impl fmt::Display for Suspense {
   }
 }
 
+impl maud::Render for Suspense {
+  fn render(&self) -> maud::Markup { maud::PreEscaped(self.to_string()) }
+}
+
 mod format {
   use std::fmt;
 

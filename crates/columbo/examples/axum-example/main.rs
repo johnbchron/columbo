@@ -4,7 +4,7 @@ use axum::{
   response::{IntoResponse, Response},
   routing::get,
 };
-use maud::{DOCTYPE, PreEscaped};
+use maud::DOCTYPE;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 #[axum::debug_handler]
@@ -26,7 +26,7 @@ async fn suspended_handler() -> impl IntoResponse {
       maud::html! {
         div {
           "I waited 2 seconds! But there's more: "
-          (PreEscaped(longer_suspend.to_string()))
+          (longer_suspend)
         }
       }
     },
@@ -41,7 +41,7 @@ async fn suspended_handler() -> impl IntoResponse {
         p {
           "Test 1 2 3"
         }
-        (PreEscaped(long_suspend.to_string()))
+        (long_suspend)
       }
     }
   }
