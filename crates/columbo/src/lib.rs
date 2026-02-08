@@ -12,7 +12,7 @@ use tokio::{
   task::{JoinError, JoinHandle},
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{Instrument, Span, debug, error, instrument, trace, warn};
+use tracing::{Instrument, Span, debug, instrument, trace, warn};
 
 use self::format::{
   SuspenseJoinError, SuspensePlaceholder, SuspenseReplacement,
@@ -51,13 +51,6 @@ impl SuspenseContext {
   {
     let id = Id::new();
     Span::current().record("suspense.id", id.to_string());
-    let placeholder = placeholder.into();
-
-    debug!(
-      suspense.id = %id,
-      placeholder.length = placeholder.len(),
-      "suspending future with placeholder"
-    );
 
     let ctx = self.clone();
     let parent_span = Span::current();
@@ -65,7 +58,7 @@ impl SuspenseContext {
     let handle = tokio::spawn(
       async move {
         let result = future(ctx).await.into();
-        trace!(result.length = result.len(), "suspended future completed");
+        trace!("suspended future completed");
         result
       }
       .instrument(tracing::info_span!(
@@ -75,20 +68,12 @@ impl SuspenseContext {
       )),
     );
 
-    match self.tx.send((id, handle)) {
-      Ok(_) => {
-        trace!(suspense.id = %id, "sent task handle to channel");
-      }
-      Err(_) => {
-        error!(
-          suspense.id = %id,
-          "failed to send task handle - receiver dropped"
-        );
-        panic!("columbo: failed send - receiver was dropped");
-      }
-    };
+    self
+      .tx
+      .send((id, handle))
+      .expect("columbo: failed send - receiver was dropped");
 
-    Suspense::new(id, placeholder)
+    Suspense::new(id, placeholder.into())
   }
 }
 
@@ -102,11 +87,7 @@ impl SuspendedResponse {
   /// Takes a channel of `(Id, JoinHandle<String>)` and awaits the tasks, then
   /// maps the task result to an HTML replacement chunk, and sends it down the
   /// stream. Prepends the HTML body to the stream.
-  #[instrument(
-    name = "columbo::into_stream",
-    skip(self, body),
-    fields(body.length = body.len())
-  )]
+  #[instrument(name = "columbo::into_stream", skip(self, body))]
   pub fn into_stream(
     self,
     body: String,
@@ -118,33 +99,14 @@ impl SuspendedResponse {
         + 'static,
     >,
   > {
-    debug!(
-      body.length = body.len(),
-      "converting suspended response into stream"
-    );
+    debug!("converting suspended response into stream");
     let parent_span = Span::current();
 
     let await_task = move |(id, jh): (Id, JoinHandle<String>)| {
       async move {
         debug!(suspense.id = %id, "awaiting suspended task");
         let result = jh.await;
-
-        match &result {
-          Ok(content) => {
-            debug!(
-              suspense.id = %id,
-              content.length = content.len(),
-              "suspended task completed successfully"
-            );
-          }
-          Err(e) => {
-            error!(
-              suspense.id = %id,
-              error = %e,
-              "suspended task failed to join"
-            );
-          }
-        }
+        debug!(suspense.id = %id, "suspended task completed");
 
         (id, result)
       }
@@ -175,11 +137,7 @@ impl SuspendedResponse {
       }
       .to_string();
 
-      debug!(
-        suspense.id = %id,
-        replacement.length = replacement.len(),
-        "generated HTML replacement chunk"
-      );
+      debug!(suspense.id = %id, "generated HTML replacement chunk");
 
       Ok(Bytes::from(replacement))
     };
@@ -214,10 +172,6 @@ impl Suspense {
       placeholder_inner,
     }
   }
-
-  pub fn id(&self) -> Id { self.id }
-
-  pub fn placeholder_html(&self) -> String { self.to_string() }
 }
 
 impl fmt::Display for Suspense {
