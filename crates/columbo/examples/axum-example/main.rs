@@ -18,7 +18,7 @@ async fn suspended_handler() -> impl IntoResponse {
       let longer_suspend = ctx.suspend(
         |_ctx| async move {
           tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-          "I waited 3 seconds!"
+          maud::html! { "I waited 3 seconds!" }
         },
         maud::html! { "[loading]" },
       );
@@ -44,8 +44,7 @@ async fn suspended_handler() -> impl IntoResponse {
         (long_suspend)
       }
     }
-  }
-  .into_string();
+  };
 
   let body = Body::from_stream(resp.into_stream(body));
   Response::builder()
