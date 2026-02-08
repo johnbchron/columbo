@@ -40,15 +40,11 @@ impl SuspenseContext {
   where
     F: FnOnce(SuspenseContext) -> Fut + Send + 'static,
     Fut: Future<Output = P> + Send + 'static,
-    P: Send,
-    String: From<P>,
+    P: Send + Into<String>,
   {
     let id = Id::new();
     let ctx = self.clone();
-    let handle = tokio::spawn(async move {
-      let output = future(ctx).await;
-      String::from(output)
-    });
+    let handle = tokio::spawn(async move { future(ctx).await.into() });
 
     let _ = self.tx.send((id, handle));
 
