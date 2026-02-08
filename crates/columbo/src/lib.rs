@@ -3,7 +3,7 @@
 //!
 //! Called `columbo` because Columbo always said, "And another thing..."
 
-use std::{convert::identity, fmt, pin::Pin};
+use std::{fmt, pin::Pin};
 
 use bytes::Bytes;
 use futures::{StreamExt, stream::once};
@@ -12,6 +12,7 @@ use tokio::{
   task::{JoinError, JoinHandle},
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
+use tracing::{Instrument, Span, debug, error, instrument, trace, warn};
 
 use self::format::{
   SuspenseJoinError, SuspensePlaceholder, SuspenseReplacement,
@@ -21,8 +22,10 @@ type Id = ulid::Ulid;
 
 /// Creates a new [`SuspenseContext`] and [`SuspendedResponse`]. The context is
 /// for suspending futures, and the response turns into an output stream.
+#[instrument(name = "columbo::new", skip_all)]
 pub fn new() -> (SuspenseContext, SuspendedResponse) {
   let (tx, rx) = mpsc::unbounded_channel();
+  debug!("created new suspense context and response");
   (SuspenseContext { tx }, SuspendedResponse { rx })
 }
 
@@ -35,6 +38,7 @@ pub struct SuspenseContext {
 impl SuspenseContext {
   /// Suspends a future. The placeholder is sent immediately, and the future
   /// output is streamed and then replaces the placeholder in the browser.
+  #[instrument(name = "columbo::suspend", skip_all, fields(suspense.id))]
   pub fn suspend<F, Fut, P>(
     &self,
     future: F,
@@ -46,10 +50,42 @@ impl SuspenseContext {
     P: Send + Into<String>,
   {
     let id = Id::new();
-    let ctx = self.clone();
-    let handle = tokio::spawn(async move { future(ctx).await.into() });
+    Span::current().record("suspense.id", id.to_string());
 
-    self.tx.send((id, handle)).expect("columbo: failed send");
+    debug!(
+      suspense.id = %id,
+      placeholder.length = placeholder_inner.len(),
+      "suspending future with placeholder"
+    );
+
+    let ctx = self.clone();
+    let parent_span = Span::current();
+
+    let handle = tokio::spawn(
+      async move {
+        let result = future(ctx).await.into();
+        trace!(result.length = result.len(), "suspended future completed");
+        result
+      }
+      .instrument(tracing::info_span!(
+        parent: parent_span,
+        "columbo::suspended_task",
+        suspense.id = %id
+      )),
+    );
+
+    match self.tx.send((id, handle)) {
+      Ok(_) => {
+        trace!(suspense.id = %id, "sent task handle to channel");
+      }
+      Err(_) => {
+        error!(
+          suspense.id = %id,
+          "failed to send task handle - receiver dropped"
+        );
+        panic!("columbo: failed send - receiver was dropped");
+      }
+    };
 
     Suspense::new(id, placeholder_inner)
   }
@@ -65,6 +101,11 @@ impl SuspendedResponse {
   /// Takes a channel of `(Id, JoinHandle<String>)` and awaits the tasks, then
   /// maps the task result to an HTML replacement chunk, and sends it down the
   /// stream. Prepends the HTML body to the stream.
+  #[instrument(
+    name = "columbo::into_stream",
+    skip(self, body),
+    fields(body.length = body.len())
+  )]
   pub fn into_stream(
     self,
     body: String,
@@ -76,23 +117,85 @@ impl SuspendedResponse {
         + 'static,
     >,
   > {
-    let await_task = move |(id, jh)| async move { (id, jh.await) };
+    debug!(
+      body.length = body.len(),
+      "converting suspended response into stream"
+    );
+    let parent_span = Span::current();
+
+    let await_task = move |(id, jh): (Id, JoinHandle<String>)| {
+      async move {
+        debug!(suspense.id = %id, "awaiting suspended task");
+        let result = jh.await;
+
+        match &result {
+          Ok(content) => {
+            debug!(
+              suspense.id = %id,
+              content.length = content.len(),
+              "suspended task completed successfully"
+            );
+          }
+          Err(e) => {
+            error!(
+              suspense.id = %id,
+              error = %e,
+              "suspended task failed to join"
+            );
+          }
+        }
+
+        (id, result)
+      }
+      .instrument(tracing::debug_span!(
+        parent: parent_span.clone(),
+        "columbo::await_task",
+        suspense.id = %id
+      ))
+    };
+
     let html_replacement = move |(id, res): (Id, Result<String, JoinError>)| {
+      let span = tracing::debug_span!(
+        "columbo::create_replacement",
+        suspense.id = %id
+      );
+      let _enter = span.enter();
+
       let replacement = SuspenseReplacement {
         id:                &id,
-        replacement_inner: &res.map_or_else(
-          |e| SuspenseJoinError { join_error: e }.to_string(),
-          identity,
-        ),
+        replacement_inner: &res.unwrap_or_else(|e| {
+          warn!(
+            suspense.id = %id,
+            error = %e,
+            "creating error replacement due to join failure"
+          );
+          SuspenseJoinError { join_error: e }.to_string()
+        }),
       }
       .to_string();
+
+      debug!(
+        suspense.id = %id,
+        replacement.length = replacement.len(),
+        "generated HTML replacement chunk"
+      );
+
       Ok(Bytes::from(replacement))
     };
 
+    let parent_span = Span::current();
     let recv_stream = UnboundedReceiverStream::new(self.rx)
       .then(await_task)
-      .map(html_replacement);
+      .map(html_replacement)
+      .chain(
+        once(async move {
+          debug!(parent: parent_span, "receiver stream ended - all senders dropped");
+          futures::stream::empty()
+        })
+        .flatten(),
+      );
 
+    trace!("stream created with initial body chunk");
     Box::pin(once(async move { Ok(Bytes::from(body)) }).chain(recv_stream))
   }
 }

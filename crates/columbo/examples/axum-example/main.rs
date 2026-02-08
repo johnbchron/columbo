@@ -5,6 +5,7 @@ use axum::{
   routing::get,
 };
 use maud::{DOCTYPE, PreEscaped};
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 #[axum::debug_handler]
 async fn suspended_handler() -> impl IntoResponse {
@@ -57,6 +58,11 @@ async fn suspended_handler() -> impl IntoResponse {
 
 #[tokio::main]
 async fn main() {
+  tracing_subscriber::registry()
+    .with(fmt::layer())
+    .with(EnvFilter::from_default_env())
+    .init();
+
   let app = Router::new().route("/", get(suspended_handler));
 
   let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
