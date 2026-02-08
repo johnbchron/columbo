@@ -20,7 +20,7 @@ async fn suspended_handler() -> impl IntoResponse {
           tokio::time::sleep(std::time::Duration::from_secs(3)).await;
           "I waited 3 seconds!"
         },
-        "[loading]".into(),
+        maud::html! { "[loading]" },
       );
 
       maud::html! {
@@ -30,7 +30,7 @@ async fn suspended_handler() -> impl IntoResponse {
         }
       }
     },
-    "[loading]".into(),
+    maud::html! { "[loading]" },
   );
 
   let body = maud::html! {

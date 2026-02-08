@@ -42,7 +42,7 @@ impl SuspenseContext {
   pub fn suspend<F, Fut, P>(
     &self,
     future: F,
-    placeholder_inner: String,
+    placeholder: impl Into<String>,
   ) -> Suspense
   where
     F: FnOnce(SuspenseContext) -> Fut + Send + 'static,
@@ -51,10 +51,11 @@ impl SuspenseContext {
   {
     let id = Id::new();
     Span::current().record("suspense.id", id.to_string());
+    let placeholder = placeholder.into();
 
     debug!(
       suspense.id = %id,
-      placeholder.length = placeholder_inner.len(),
+      placeholder.length = placeholder.len(),
       "suspending future with placeholder"
     );
 
@@ -87,7 +88,7 @@ impl SuspenseContext {
       }
     };
 
-    Suspense::new(id, placeholder_inner)
+    Suspense::new(id, placeholder)
   }
 }
 
