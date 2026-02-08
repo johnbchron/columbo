@@ -7,7 +7,10 @@ use std::{convert::identity, fmt, pin::Pin};
 
 use bytes::Bytes;
 use futures::{StreamExt, stream::once};
-use tokio::{sync::mpsc, task::JoinHandle};
+use tokio::{
+  sync::mpsc,
+  task::{JoinError, JoinHandle},
+};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use self::format::{
@@ -46,7 +49,7 @@ impl SuspenseContext {
     let ctx = self.clone();
     let handle = tokio::spawn(async move { future(ctx).await.into() });
 
-    let _ = self.tx.send((id, handle));
+    self.tx.send((id, handle)).expect("columbo: failed send");
 
     Suspense::new(id, placeholder_inner)
   }
@@ -58,6 +61,10 @@ pub struct SuspendedResponse {
 
 impl SuspendedResponse {
   /// Turns the `SuspendedResponse` into a stream for sending as a response.
+  ///
+  /// Takes a channel of `(Id, JoinHandle<String>)` and awaits the tasks, then
+  /// maps the task result to an HTML replacement chunk, and sends it down the
+  /// stream. Prepends the HTML body to the stream.
   pub fn into_stream(
     self,
     body: String,
@@ -69,21 +76,22 @@ impl SuspendedResponse {
         + 'static,
     >,
   > {
-    let html_replacement = move |(id, jh): (Id, JoinHandle<String>)| async move {
-      Ok(Bytes::from(
-        SuspenseReplacement {
-          id:                &id,
-          replacement_inner: &jh.await.map_or_else(
-            |e| SuspenseJoinError { join_error: e }.to_string(),
-            identity,
-          ),
-        }
-        .to_string(),
-      ))
+    let await_task = move |(id, jh)| async move { (id, jh.await) };
+    let html_replacement = move |(id, res): (Id, Result<String, JoinError>)| {
+      let replacement = SuspenseReplacement {
+        id:                &id,
+        replacement_inner: &res.map_or_else(
+          |e| SuspenseJoinError { join_error: e }.to_string(),
+          identity,
+        ),
+      }
+      .to_string();
+      Ok(Bytes::from(replacement))
     };
 
-    let recv_stream =
-      UnboundedReceiverStream::new(self.rx).then(html_replacement);
+    let recv_stream = UnboundedReceiverStream::new(self.rx)
+      .then(await_task)
+      .map(html_replacement);
 
     Box::pin(once(async move { Ok(Bytes::from(body)) }).chain(recv_stream))
   }
