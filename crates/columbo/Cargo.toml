@@ -15,5 +15,6 @@ ulid = "1"
 
 [dev-dependencies]
 axum = { version = "0.8", features = [ "macros" ] }
+nanorand = "0.8"
 tokio = { version = "1", features = [ "full" ] }
 tracing-subscriber = { version = "0.3", features = [ "env-filter" ] }
