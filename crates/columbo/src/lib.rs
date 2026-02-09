@@ -40,20 +40,21 @@ impl SuspenseContext {
   /// Suspends a future. The placeholder is sent immediately, and the future
   /// output is streamed and then replaces the placeholder in the browser.
   #[instrument(name = "columbo::suspend", skip_all, fields(suspense.id))]
-  pub fn suspend<F, Fut>(&self, future: F, placeholder: Markup) -> Suspense
+  pub fn suspend<F, Fut>(&self, f: F, placeholder: Markup) -> Suspense
   where
-    F: FnOnce(SuspenseContext) -> Fut + Send + 'static,
+    F: FnOnce(SuspenseContext) -> Fut,
     Fut: Future<Output = Markup> + Send + 'static,
   {
     let id = Id::new();
     Span::current().record("suspense.id", id.to_string());
 
     let ctx = self.clone();
-    let parent_span = Span::current();
+    let future = f(ctx);
 
+    let parent_span = Span::current();
     let handle = tokio::spawn(
       async move {
-        let result = future(ctx).await;
+        let result = future.await;
         trace!("suspended future completed");
         result
       }
