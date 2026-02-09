@@ -138,9 +138,10 @@ impl SuspendedResponse {
       replacement
     };
 
-    // stream of join handles and IDs
-    let task_result_stream =
-      UnboundedReceiverStream::new(self.rx).then(await_task);
+    // stream of join handles and IDs, buffered out of order
+    let task_result_stream = UnboundedReceiverStream::new(self.rx)
+      .map(await_task)
+      .buffer_unordered(8);
     // stream of markup chunks, including initial body
     let markup_stream =
       once(async move { body }).chain(task_result_stream.map(html_replacement));
