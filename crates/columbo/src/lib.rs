@@ -3,7 +3,13 @@
 //!
 //! Called `columbo` because Columbo always said, "And another thing..."
 
-use std::pin::Pin;
+use std::{
+  pin::Pin,
+  sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+  },
+};
 
 use bytes::Bytes;
 use futures::{StreamExt, stream::once};
@@ -16,7 +22,7 @@ use self::format::{
   SuspenseJoinError, SuspensePlaceholder, SuspenseReplacement,
 };
 
-type Id = ulid::Ulid;
+type Id = usize;
 
 /// Creates a new [`SuspenseContext`] and [`SuspendedResponse`]. The context is
 /// for suspending futures, and the response turns into an output stream.
@@ -24,17 +30,24 @@ type Id = ulid::Ulid;
 pub fn new() -> (SuspenseContext, SuspendedResponse) {
   let (tx, rx) = mpsc::channel(16);
   debug!("created new suspense context and response");
-  (SuspenseContext { tx }, SuspendedResponse { rx })
+  (
+    SuspenseContext {
+      next_id: Arc::new(AtomicUsize::new(0)),
+      tx,
+    },
+    SuspendedResponse { rx },
+  )
 }
 
 /// The context with which you can create suspense boundaries for futures.
 #[derive(Clone)]
 pub struct SuspenseContext {
-  tx: mpsc::Sender<Markup>,
+  next_id: Arc<AtomicUsize>,
+  tx:      mpsc::Sender<Markup>,
 }
 
 impl SuspenseContext {
-  fn new_id(&self) -> Id { Id::new() }
+  fn new_id(&self) -> Id { self.next_id.fetch_add(1, Ordering::Relaxed) }
 
   /// Suspends a future. The placeholder is sent immediately, and the future
   /// output is streamed and then replaces the placeholder in the browser.
