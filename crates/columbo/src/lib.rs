@@ -47,10 +47,15 @@ pub struct SuspenseContext {
 }
 
 impl SuspenseContext {
-  fn new_id(&self) -> Id { self.next_id.fetch_add(1, Ordering::Relaxed) }
+  fn new_id(&self) -> Id {
+    // IDs don't need to be sequential, only unique
+    self.next_id.fetch_add(1, Ordering::Relaxed)
+  }
 
-  /// Suspends a future. The placeholder is sent immediately, and the future
-  /// output is streamed and then replaces the placeholder in the browser.
+  /// Suspends async work and streams the result. This function takes a closure
+  /// that returns a future, allowing the future to spawn more suspensions. The
+  /// placeholder is sent immediately, while the future output is streamed and
+  /// replaces the placeholder in the browser.
   ///
   /// Suspended futures must be `Send` because they are handed to `tokio`.
   #[instrument(name = "columbo::suspend", skip_all, fields(suspense.id))]
