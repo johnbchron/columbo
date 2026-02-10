@@ -9,7 +9,7 @@ use bytes::Bytes;
 use futures::{StreamExt, stream::once};
 use maud::{Markup, Render};
 use tokio::sync::mpsc;
-use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio_stream::wrappers::ReceiverStream;
 use tracing::{Instrument, Span, debug, instrument, trace, warn};
 
 use self::format::{
@@ -22,7 +22,7 @@ type Id = ulid::Ulid;
 /// for suspending futures, and the response turns into an output stream.
 #[instrument(name = "columbo::new", skip_all)]
 pub fn new() -> (SuspenseContext, SuspendedResponse) {
-  let (tx, rx) = mpsc::unbounded_channel();
+  let (tx, rx) = mpsc::channel(16);
   debug!("created new suspense context and response");
   (SuspenseContext { tx }, SuspendedResponse { rx })
 }
@@ -30,66 +30,65 @@ pub fn new() -> (SuspenseContext, SuspendedResponse) {
 /// The context with which you can create suspense boundaries for futures.
 #[derive(Clone)]
 pub struct SuspenseContext {
-  tx: mpsc::UnboundedSender<Markup>,
+  tx: mpsc::Sender<Markup>,
 }
 
 impl SuspenseContext {
+  fn new_id(&self) -> Id { Id::new() }
+
   /// Suspends a future. The placeholder is sent immediately, and the future
   /// output is streamed and then replaces the placeholder in the browser.
+  ///
+  /// Suspended futures must be `Send` because they are handed to `tokio`.
   #[instrument(name = "columbo::suspend", skip_all, fields(suspense.id))]
   pub fn suspend<F, Fut>(&self, f: F, placeholder: Markup) -> Suspense
   where
     F: FnOnce(SuspenseContext) -> Fut,
     Fut: Future<Output = Markup> + Send + 'static,
   {
-    let id = Id::new();
+    let id = self.new_id();
     Span::current().record("suspense.id", id.to_string());
 
-    let ctx = self.clone();
-    let future = f(ctx);
-
-    let parent_span = Span::current();
-    let tx = self.tx.clone();
-
-    tokio::spawn(async move {
-      let instrumented_future = future.instrument(tracing::info_span!(
-        parent: parent_span,
-        "columbo::suspended_task",
-        suspense.id = %id
-      ));
-      let result = tokio::spawn(instrumented_future).await;
-
-      let replacement = SuspenseReplacement {
-        id:                &id,
-        replacement_inner: &result.unwrap_or_else(|e| {
-          warn!(
-            suspense.id = %id,
-            error = %e,
-            "creating error replacement due to join failure"
-          );
-          SuspenseJoinError { join_error: e }.render()
-        }),
-      }
-      .render();
-
-      tx.send(replacement)
-        .expect("columbo: failed send - receiver was dropped");
-    });
+    tokio::spawn(
+      handle_suspended_future(id, f(self.clone()), self.tx.clone())
+        .instrument(tracing::info_span!("columbo::suspended_task",)),
+    );
 
     Suspense::new(id, placeholder)
   }
 }
 
+async fn handle_suspended_future<Fut>(
+  id: Id,
+  future: Fut,
+  tx: mpsc::Sender<Markup>,
+) where
+  Fut: Future<Output = Markup> + Send + 'static,
+{
+  let result = tokio::spawn(future).await;
+
+  let replacement = SuspenseReplacement {
+    id:                &id,
+    replacement_inner: &result.unwrap_or_else(|e| {
+      warn!(
+        suspense.id = %id,
+        error = %e,
+        "creating error replacement due to join failure"
+      );
+      SuspenseJoinError { join_error: e }.render()
+    }),
+  }
+  .render();
+
+  let _ = tx.send(replacement).await;
+}
+
 pub struct SuspendedResponse {
-  rx: mpsc::UnboundedReceiver<Markup>,
+  rx: mpsc::Receiver<Markup>,
 }
 
 impl SuspendedResponse {
   /// Turns the `SuspendedResponse` into a stream for sending as a response.
-  ///
-  /// Takes a channel of `(Id, JoinHandle<String>)` and awaits the tasks, then
-  /// maps the task result to an HTML replacement chunk, and sends it down the
-  /// stream. Prepends the HTML body to the stream.
   #[instrument(name = "columbo::into_stream", skip_all)]
   pub fn into_stream(
     self,
@@ -106,7 +105,7 @@ impl SuspendedResponse {
 
     // stream of markup chunks, including initial body
     let markup_stream =
-      once(async move { body }).chain(UnboundedReceiverStream::new(self.rx));
+      once(async move { body }).chain(ReceiverStream::new(self.rx));
     let parent_span = Span::current();
     // debugging to note when stream terminates
     let stream_end = once(async move {
