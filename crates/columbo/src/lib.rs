@@ -8,10 +8,7 @@ use std::pin::Pin;
 use bytes::Bytes;
 use futures::{StreamExt, stream::once};
 use maud::{Markup, Render};
-use tokio::{
-  sync::mpsc,
-  task::{JoinError, JoinHandle},
-};
+use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{Instrument, Span, debug, instrument, trace, warn};
 
@@ -33,7 +30,7 @@ pub fn new() -> (SuspenseContext, SuspendedResponse) {
 /// The context with which you can create suspense boundaries for futures.
 #[derive(Clone)]
 pub struct SuspenseContext {
-  tx: mpsc::UnboundedSender<(Id, JoinHandle<Markup>)>,
+  tx: mpsc::UnboundedSender<Markup>,
 }
 
 impl SuspenseContext {
@@ -52,30 +49,39 @@ impl SuspenseContext {
     let future = f(ctx);
 
     let parent_span = Span::current();
-    let handle = tokio::spawn(
-      async move {
-        let result = future.await;
-        trace!("suspended future completed");
-        result
-      }
-      .instrument(tracing::info_span!(
+    let tx = self.tx.clone();
+
+    tokio::spawn(async move {
+      let instrumented_future = future.instrument(tracing::info_span!(
         parent: parent_span,
         "columbo::suspended_task",
         suspense.id = %id
-      )),
-    );
+      ));
+      let result = tokio::spawn(instrumented_future).await;
 
-    self
-      .tx
-      .send((id, handle))
-      .expect("columbo: failed send - receiver was dropped");
+      let replacement = SuspenseReplacement {
+        id:                &id,
+        replacement_inner: &result.unwrap_or_else(|e| {
+          warn!(
+            suspense.id = %id,
+            error = %e,
+            "creating error replacement due to join failure"
+          );
+          SuspenseJoinError { join_error: e }.render()
+        }),
+      }
+      .render();
+
+      tx.send(replacement)
+        .expect("columbo: failed send - receiver was dropped");
+    });
 
     Suspense::new(id, placeholder)
   }
 }
 
 pub struct SuspendedResponse {
-  rx: mpsc::UnboundedReceiver<(Id, JoinHandle<Markup>)>,
+  rx: mpsc::UnboundedReceiver<Markup>,
 }
 
 impl SuspendedResponse {
@@ -97,55 +103,10 @@ impl SuspendedResponse {
     >,
   > {
     debug!("converting suspended response into stream");
-    let parent_span = Span::current();
 
-    let await_task = move |(id, jh): (Id, JoinHandle<Markup>)| {
-      async move {
-        debug!(suspense.id = %id, "awaiting suspended task");
-        let result = jh.await;
-        debug!(suspense.id = %id, "suspended task completed");
-
-        (id, result)
-      }
-      .instrument(tracing::debug_span!(
-        parent: parent_span.clone(),
-        "columbo::await_task",
-        suspense.id = %id
-      ))
-    };
-
-    let html_replacement = move |(id, res): (Id, Result<Markup, JoinError>)| {
-      let span = tracing::debug_span!(
-        "columbo::create_replacement",
-        suspense.id = %id
-      );
-      let _enter = span.enter();
-
-      let replacement = SuspenseReplacement {
-        id:                &id,
-        replacement_inner: &res.unwrap_or_else(|e| {
-          warn!(
-            suspense.id = %id,
-            error = %e,
-            "creating error replacement due to join failure"
-          );
-          SuspenseJoinError { join_error: e }.render()
-        }),
-      }
-      .render();
-
-      debug!(suspense.id = %id, "generated HTML replacement chunk");
-
-      replacement
-    };
-
-    // stream of join handles and IDs, buffered out of order
-    let task_result_stream = UnboundedReceiverStream::new(self.rx)
-      .map(await_task)
-      .buffer_unordered(8);
     // stream of markup chunks, including initial body
     let markup_stream =
-      once(async move { body }).chain(task_result_stream.map(html_replacement));
+      once(async move { body }).chain(UnboundedReceiverStream::new(self.rx));
     let parent_span = Span::current();
     // debugging to note when stream terminates
     let stream_end = once(async move {
