@@ -6,13 +6,11 @@
 //! Called `columbo` because Columbo always said, "And another thing..."
 
 mod format;
+mod run_suspended;
 
 use std::{
-  any::Any,
   boxed::Box,
-  panic::AssertUnwindSafe,
   pin::Pin,
-  string::String,
   sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
@@ -20,13 +18,13 @@ use std::{
 };
 
 use bytes::Bytes;
-use futures::{FutureExt, StreamExt, stream::once};
-use maud::{Markup, Render};
+use futures::{StreamExt, stream::once};
+use maud::Markup;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{Instrument, Span, debug, instrument, trace, warn};
 
-use self::format::{SuspensePanic, SuspensePlaceholder, SuspenseReplacement};
+use self::{format::SuspensePlaceholder, run_suspended::run_suspended_future};
 
 type Id = usize;
 
@@ -74,42 +72,12 @@ impl SuspenseContext {
     Span::current().record("suspense.id", id.to_string());
 
     tokio::spawn(
-      handle_suspended_future(id, f(self.clone()), self.tx.clone())
+      run_suspended_future(id, f(self.clone()), self.tx.clone())
         .instrument(tracing::info_span!("columbo::suspended_task",)),
     );
 
     Suspense::new(id, placeholder)
   }
-}
-
-async fn handle_suspended_future<Fut>(
-  id: Id,
-  future: Fut,
-  tx: mpsc::Sender<Markup>,
-) where
-  Fut: Future<Output = Markup> + Send + 'static,
-{
-  // run the future to completion
-  let result = AssertUnwindSafe(future).catch_unwind().await;
-
-  // determine what to swap in
-  let content = match result {
-    Ok(m) => m,
-    Err(panic_payload) => {
-      let error = panic_payload_to_string(&panic_payload);
-      warn!(suspense.id = %id, error, "creating error replacement due to panic");
-      SuspensePanic { error }.render()
-    }
-  };
-
-  // render the wrapper and script
-  let payload = SuspenseReplacement {
-    id:                &id,
-    replacement_inner: &content,
-  }
-  .render();
-
-  let _ = tx.send(payload).await;
 }
 
 pub struct SuspendedResponse {
@@ -175,14 +143,4 @@ impl maud::Render for Suspense {
     }
     .render()
   }
-}
-
-fn panic_payload_to_string(payload: &Box<dyn Any + Send>) -> String {
-  if let Some(s) = payload.downcast_ref::<&str>() {
-    return s.to_string();
-  }
-  if let Some(s) = payload.downcast_ref::<String>() {
-    return s.clone();
-  }
-  "Box<dyn Any>".to_string()
 }
