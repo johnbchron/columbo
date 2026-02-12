@@ -7,7 +7,7 @@ use std::{
 use bytes::Bytes;
 use futures::{Stream, StreamExt, stream::once};
 use maud::Markup;
-use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{Span, debug, trace};
 
 use crate::SuspendedResponse;
@@ -21,8 +21,8 @@ pub struct MarkupStream {
 impl MarkupStream {
   pub(crate) fn new(resp: SuspendedResponse, main_chunk: Markup) -> Self {
     // stream of markup chunks, including initial body
-    let markup_stream =
-      once(async move { main_chunk }).chain(ReceiverStream::new(resp.rx));
+    let markup_stream = once(async move { main_chunk })
+      .chain(UnboundedReceiverStream::new(resp.rx));
 
     let parent_span = Span::current();
     // debugging to note when stream terminates

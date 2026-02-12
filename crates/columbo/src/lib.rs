@@ -118,7 +118,7 @@ type Id = usize;
 /// for suspending futures, and the response turns into an output stream.
 #[instrument(name = "columbo::new", skip_all)]
 pub fn new() -> (SuspenseContext, SuspendedResponse) {
-  let (tx, rx) = mpsc::channel(16);
+  let (tx, rx) = mpsc::unbounded_channel();
   debug!("created new suspense context and response");
   (
     SuspenseContext {
@@ -133,7 +133,7 @@ pub fn new() -> (SuspenseContext, SuspendedResponse) {
 #[derive(Clone)]
 pub struct SuspenseContext {
   next_id: Arc<AtomicUsize>,
-  tx:      mpsc::Sender<Markup>,
+  tx:      mpsc::UnboundedSender<Markup>,
 }
 
 impl SuspenseContext {
@@ -169,7 +169,7 @@ impl SuspenseContext {
 /// Contains suspended results. Can be turned into a byte stream with a
 /// prepended document.
 pub struct SuspendedResponse {
-  rx: mpsc::Receiver<Markup>,
+  rx: mpsc::UnboundedReceiver<Markup>,
 }
 
 impl SuspendedResponse {

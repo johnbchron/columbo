@@ -13,7 +13,7 @@ use crate::{
 pub(crate) async fn run_suspended_future<Fut>(
   id: Id,
   future: Fut,
-  tx: mpsc::Sender<Markup>,
+  tx: mpsc::UnboundedSender<Markup>,
 ) where
   Fut: Future<Output = Markup> + Send + 'static,
 {
@@ -37,7 +37,8 @@ pub(crate) async fn run_suspended_future<Fut>(
   }
   .render();
 
-  let _ = tx.send(payload).await;
+  // send, ignoring if receiver is closed
+  let _ = tx.send(payload);
 }
 
 fn panic_payload_to_string(payload: &Box<dyn Any + Send>) -> String {
