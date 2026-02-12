@@ -1,5 +1,4 @@
 use maud::{Markup, PreEscaped, Render, html};
-use tokio::task::JoinError;
 
 use crate::Id;
 
@@ -50,25 +49,25 @@ impl<'a> Render for SuspenseReplacement<'a> {
   }
 }
 
-pub(crate) struct SuspenseJoinError {
-  pub join_error: JoinError,
+pub(crate) struct SuspensePanic {
+  pub error: String,
 }
 
-impl Render for SuspenseJoinError {
+impl Render for SuspensePanic {
   fn render(&self) -> Markup {
     html! {
       div style="font-family: monospace; padding: 20px; background: #ffe6e6; color: #000; border: 2px solid #c00;" {
         h1 style="color: #c00; font-size: 18px; margin: 0 0 10px 0;" {
-          "Columbo Task JoinError"
+          "Columbo Suspense Panic"
         }
         p style="margin: 10px 0;" {
-          "Columbo could not swap in a suspended response because the joining the suspended task failed."
+          "Columbo could not swap in a suspended response because the suspended future panicked."
         }
         h2 style="font-size: 16px; margin: 20px 0 10px 0;" {
           "Error:"
         }
         pre style="background: #f5f5f5; padding: 10px; overflow: auto; border: 1px solid #ccc; font-size: 12px;" {
-          (self.join_error)
+          (self.error)
         }
       }
     }

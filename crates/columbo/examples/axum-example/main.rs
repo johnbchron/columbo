@@ -12,7 +12,7 @@ use nanorand::Rng;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 #[axum::debug_handler]
-async fn suspended_handler() -> impl IntoResponse {
+async fn nested_handler() -> impl IntoResponse {
   let (ctx, resp) = columbo::new();
 
   let long_suspend = ctx.suspend(
@@ -46,6 +46,42 @@ async fn suspended_handler() -> impl IntoResponse {
           "Test 1 2 3"
         }
         (long_suspend)
+      }
+    }
+  };
+
+  let body = Body::from_stream(resp.into_stream(body));
+  Response::builder()
+    .header("Content-Type", "text/html; charset=utf-8")
+    .header("Transfer-Encoding", "chunked")
+    .header("X-Content-Type-Options", "nosniff")
+    .body(body)
+    .unwrap()
+}
+
+#[axum::debug_handler]
+async fn panicking_handler() -> impl IntoResponse {
+  let (ctx, resp) = columbo::new();
+
+  let panicking_suspend = ctx.suspend(
+    |_ctx| async move {
+      tokio::time::sleep(Duration::from_secs(1)).await;
+      panic!("I don't know! The programmer told me to panic!")
+    },
+    html! {
+      "loading..."
+    },
+  );
+
+  let body = html! {
+    (DOCTYPE)
+    html {
+      head;
+      body {
+        p {
+          "The following will panic:"
+        }
+        (panicking_suspend)
       }
     }
   };
@@ -121,8 +157,9 @@ async fn main() {
     .init();
 
   let app = Router::new()
-    .route("/", get(suspended_handler))
-    .route("/multi", get(multi_suspended_handler));
+    .route("/", get(nested_handler))
+    .route("/multi", get(multi_suspended_handler))
+    .route("/panic", get(panicking_handler));
 
   let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
   axum::serve(listener, app).await.unwrap();
