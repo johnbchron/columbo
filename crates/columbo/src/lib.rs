@@ -6,25 +6,22 @@
 //! Called `columbo` because Columbo always said, "And another thing..."
 
 mod format;
+mod markup_stream;
 mod run_suspended;
 
-use std::{
-  boxed::Box,
-  pin::Pin,
-  sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
-  },
+use std::sync::{
+  Arc,
+  atomic::{AtomicUsize, Ordering},
 };
 
-use bytes::Bytes;
-use futures::{StreamExt, stream::once};
 use maud::Markup;
 use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
-use tracing::{Instrument, Span, debug, instrument, trace, warn};
+use tracing::{Instrument, Span, debug, instrument, warn};
 
-use self::{format::SuspensePlaceholder, run_suspended::run_suspended_future};
+use self::{
+  format::SuspensePlaceholder, markup_stream::MarkupStream,
+  run_suspended::run_suspended_future,
+};
 
 type Id = usize;
 
@@ -87,36 +84,9 @@ pub struct SuspendedResponse {
 impl SuspendedResponse {
   /// Turns the `SuspendedResponse` into a stream for sending as a response.
   #[instrument(name = "columbo::into_stream", skip_all)]
-  pub fn into_stream(
-    self,
-    body: Markup,
-  ) -> Pin<
-    Box<
-      dyn futures::Stream<Item = Result<Bytes, std::io::Error>>
-        + Send
-        + Sync
-        + 'static,
-    >,
-  > {
+  pub fn into_stream(self, body: Markup) -> MarkupStream {
     debug!("converting suspended response into stream");
-
-    // stream of markup chunks, including initial body
-    let markup_stream =
-      once(async move { body }).chain(ReceiverStream::new(self.rx));
-    let parent_span = Span::current();
-    // debugging to note when stream terminates
-    let stream_end = once(async move {
-        debug!(parent: parent_span, "receiver stream ended - all senders dropped");
-        futures::stream::empty()
-      })
-      .flatten();
-    // final stream, adapted to IO convention
-    let stream = markup_stream
-      .map(|c| Ok(Bytes::from(c.into_string())))
-      .chain(stream_end);
-
-    trace!("stream created with initial body chunk");
-    Box::pin(stream)
+    MarkupStream::new(self, body)
   }
 }
 
