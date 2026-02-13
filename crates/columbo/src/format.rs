@@ -3,8 +3,8 @@ use maud::{Markup, PreEscaped, Render, html};
 use crate::Id;
 
 pub(crate) struct SuspensePlaceholder<'a> {
-  pub id:                &'a Id,
-  pub placeholder_inner: &'a Markup,
+  pub id:    &'a Id,
+  pub inner: &'a Markup,
 }
 
 impl<'a> Render for SuspensePlaceholder<'a> {
@@ -14,15 +14,15 @@ impl<'a> Render for SuspensePlaceholder<'a> {
         data-columbo-p-id=(self.id)
         style="display: contents;"
       {
-        (self.placeholder_inner)
+        (self.inner)
       }
     }
   }
 }
 
 pub(crate) struct SuspenseReplacement<'a> {
-  pub id:                &'a Id,
-  pub replacement_inner: &'a Markup,
+  pub id:    &'a Id,
+  pub inner: &'a Markup,
 }
 
 impl<'a> Render for SuspenseReplacement<'a> {
@@ -40,7 +40,7 @@ impl<'a> Render for SuspenseReplacement<'a> {
 
     html! {
       template data-columbo-r-id=(self.id) {
-        (self.replacement_inner)
+        (self.inner)
       }
       script {
         (PreEscaped(script))

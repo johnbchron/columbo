@@ -32,8 +32,8 @@ pub(crate) async fn run_suspended_future<Fut>(
 
   // render the wrapper and script
   let payload = SuspenseReplacement {
-    id:                &id,
-    replacement_inner: &content,
+    id:    &id,
+    inner: &content,
   }
   .render();
 

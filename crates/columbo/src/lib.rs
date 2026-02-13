@@ -186,8 +186,8 @@ impl SuspendedResponse {
 
 /// A suspended future. Can be interpolated into markup as the placeholder.
 pub struct Suspense {
-  id:                Id,
-  placeholder_inner: Markup,
+  id:          Id,
+  placeholder: Markup,
 }
 
 impl fmt::Debug for Suspense {
@@ -197,19 +197,14 @@ impl fmt::Debug for Suspense {
 }
 
 impl Suspense {
-  fn new(id: Id, placeholder_inner: Markup) -> Self {
-    Suspense {
-      id,
-      placeholder_inner,
-    }
-  }
+  fn new(id: Id, placeholder: Markup) -> Self { Suspense { id, placeholder } }
 }
 
 impl maud::Render for Suspense {
   fn render(&self) -> maud::Markup {
     SuspensePlaceholder {
-      id:                &self.id,
-      placeholder_inner: &self.placeholder_inner,
+      id:    &self.id,
+      inner: &self.placeholder,
     }
     .render()
   }
