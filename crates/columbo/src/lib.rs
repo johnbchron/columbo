@@ -34,12 +34,14 @@
 //! future that completes first will stream first.
 //!
 //! ## Cancel Safety
-//! If [`SuspendedResponse`] or the type resulting from
+//! By default, if [`SuspendedResponse`] or the type resulting from
 //! [`into_stream()`](SuspendedResponse::into_stream) are dropped, the futures
 //! that have been suspended will continue to run, but their results will be
-//! inaccessible. If you would like for tasks to cancel, you can use
+//! inaccessible. If you would like for tasks to cancel instead, you can enable
+//! `auto_cancel` in [`ColumboOptions`], or you can use
 //! [`cancelled()`](SuspenseContext::cancelled) or
-//! [`is_cancelled()`](SuspenseContext::is_cancelled) to exit early.
+//! [`is_cancelled()`](SuspenseContext::is_cancelled) to exit early from within
+//! the future.
 //!
 //! # Axum Example
 //!
@@ -247,6 +249,7 @@ impl SuspenseContext {
         f(self.clone()),
         self.tx.clone(),
         self.opts.clone(),
+        self.cancel.clone(),
       )
       .instrument(tracing::info_span!("columbo::suspended_task",)),
     );
@@ -275,6 +278,9 @@ impl SuspenseContext {
 pub struct ColumboOptions {
   /// Renders a panic fallback given the panic object.
   pub panic_renderer: Option<fn(Box<dyn Any + Send>) -> Markup>,
+  /// Whether to automatically cancel suspended futures at the next await bound
+  /// when the response is dropped.
+  pub auto_cancel:    Option<bool>,
 }
 
 /// Contains suspended results. Can be turned into a byte stream with a

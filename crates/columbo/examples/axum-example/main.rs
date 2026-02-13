@@ -103,6 +103,7 @@ fn panic_renderer(_panic_object: Box<dyn Any + Send>) -> maud::Markup {
 async fn custom_panicking_handler() -> impl IntoResponse {
   let (ctx, resp) = columbo::new_with_opts(ColumboOptions {
     panic_renderer: Some(panic_renderer),
+    ..Default::default()
   });
 
   // suspend a future, providing a future and a placeholder
@@ -188,7 +189,7 @@ async fn multi_suspended_handler(
 }
 
 #[axum::debug_handler]
-async fn cancelled_handler() -> impl IntoResponse {
+async fn manually_cancelled_handler() -> impl IntoResponse {
   let (ctx, resp) = columbo::new();
 
   let suspend = ctx.suspend(
@@ -222,6 +223,44 @@ async fn cancelled_handler() -> impl IntoResponse {
     .unwrap()
 }
 
+#[axum::debug_handler]
+async fn auto_cancelled_handler() -> impl IntoResponse {
+  let (ctx, resp) = columbo::new_with_opts(ColumboOptions {
+    auto_cancel: Some(true),
+    ..Default::default()
+  });
+
+  let suspend = ctx.suspend(
+    |_ctx| async move {
+      tokio::time::sleep(Duration::from_secs(10)).await;
+      tracing::warn!("handler completed");
+      html! { "[10 seconds later]" }
+    },
+    html! { "[loading]" },
+  );
+
+  let body = html! {
+    (DOCTYPE)
+    html {
+      head;
+      body {
+        p {
+          "This will never resolve in 10 seconds:"
+        }
+        (suspend)
+      }
+    }
+  };
+
+  let body = Body::from_stream(resp.into_stream(body));
+  Response::builder()
+    .header("Content-Type", "text/html; charset=utf-8")
+    .header("Transfer-Encoding", "chunked")
+    .header("X-Content-Type-Options", "nosniff")
+    .body(body)
+    .unwrap()
+}
+
 #[tokio::main]
 async fn main() {
   tracing_subscriber::registry()
@@ -234,7 +273,8 @@ async fn main() {
     .route("/multi", get(multi_suspended_handler))
     .route("/panic", get(panicking_handler))
     .route("/custom_panic", get(custom_panicking_handler))
-    .route("/cancel", get(cancelled_handler));
+    .route("/manual_cancel", get(manually_cancelled_handler))
+    .route("/auto_cancel", get(auto_cancelled_handler));
 
   let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
   axum::serve(listener, app).await.unwrap();
