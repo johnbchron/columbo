@@ -3,7 +3,7 @@ use std::{any::Any, panic::AssertUnwindSafe};
 use futures::FutureExt;
 use maud::{Markup, Render};
 use tokio::sync::mpsc;
-use tracing::warn;
+use tracing::{trace, warn};
 
 use crate::{
   Id,
@@ -37,8 +37,9 @@ pub(crate) async fn run_suspended_future<Fut>(
   }
   .render();
 
-  // send, ignoring if receiver is closed
-  let _ = tx.send(payload);
+  let _ = tx.send(payload).inspect_err(|_| {
+    trace!(suspense.id = %id, "future completed but receiver is dropped");
+  });
 }
 
 fn panic_payload_to_string(payload: &Box<dyn Any + Send>) -> String {
