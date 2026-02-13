@@ -30,6 +30,9 @@
 //! itself for the futures it suspends by taking a closure returning a future,
 //! so futures can spawn additional suspensions or listen for cancellation.
 //!
+//! Responses are streamed in completion order, not registration order, so the
+//! future that completes first will stream first.
+//!
 //! ## Cancel Safety
 //! If [`SuspendedResponse`] or the type resulting from
 //! [`into_stream()`](SuspendedResponse::into_stream) are dropped, the futures
