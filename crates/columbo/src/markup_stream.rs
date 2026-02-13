@@ -6,11 +6,13 @@ use std::{
 
 use bytes::Bytes;
 use futures::{Stream, StreamExt, stream::once};
-use maud::Markup;
+use maud::{Markup, html};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{Span, debug, trace};
 
-use crate::{SuspendedResponse, cancel_on_drop::CancelOnDrop};
+use crate::{
+  SuspendedResponse, cancel_on_drop::CancelOnDrop, format::GlobalSuspenseScript,
+};
 
 pub struct MarkupStream {
   inner: Pin<
@@ -21,6 +23,11 @@ pub struct MarkupStream {
 
 impl MarkupStream {
   pub(crate) fn new(resp: SuspendedResponse, main_chunk: Markup) -> Self {
+    let main_chunk = html! {
+      (main_chunk)
+      (GlobalSuspenseScript)
+    };
+
     // stream of markup chunks, including initial body
     let markup_stream = once(async move { main_chunk })
       .chain(UnboundedReceiverStream::new(resp.rx));

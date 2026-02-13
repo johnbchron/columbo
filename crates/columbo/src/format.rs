@@ -29,24 +29,22 @@ pub(crate) struct SuspenseReplacement<'a> {
 
 impl<'a> Render for SuspenseReplacement<'a> {
   fn render(&self) -> Markup {
-    let script = format!(
-      r#"(function() {{
-          const t = document.querySelector('[data-columbo-p-id="{id}"]');
-          const r = document.querySelector('[data-columbo-r-id="{id}"]');
-          if (t && r && t.parentNode) {{
-            t.parentNode.replaceChild(r.content, t);
-          }}
-        }})();"#,
-      id = self.id
-    );
-
     html! {
       template data-columbo-r-id=(self.id) {
         (self.inner)
       }
-      script {
-        (PreEscaped(script))
-      }
+    }
+  }
+}
+
+const GLOBAL_SCRIPT_CONTENTS: &str = include_str!("./columbo.js");
+
+pub(crate) struct GlobalSuspenseScript;
+
+impl Render for GlobalSuspenseScript {
+  fn render(&self) -> Markup {
+    html! {
+      script { (PreEscaped(GLOBAL_SCRIPT_CONTENTS)) }
     }
   }
 }
