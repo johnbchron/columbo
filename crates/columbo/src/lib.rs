@@ -98,9 +98,12 @@ mod format;
 mod markup_stream;
 mod run_suspended;
 
-use std::sync::{
-  Arc,
-  atomic::{AtomicUsize, Ordering},
+use std::{
+  fmt,
+  sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+  },
 };
 
 use maud::Markup;
@@ -185,6 +188,12 @@ impl SuspendedResponse {
 pub struct Suspense {
   id:                Id,
   placeholder_inner: Markup,
+}
+
+impl fmt::Debug for Suspense {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    f.debug_struct("Suspense").field("id", &self.id).finish()
+  }
 }
 
 impl Suspense {
