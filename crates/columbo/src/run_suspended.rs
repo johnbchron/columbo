@@ -42,7 +42,7 @@ pub(crate) async fn run_suspended_future<Fut>(
   });
 }
 
-fn panic_payload_to_string(payload: &Box<dyn Any + Send>) -> String {
+fn panic_payload_to_string(payload: &dyn Any) -> String {
   if let Some(s) = payload.downcast_ref::<&str>() {
     return s.to_string();
   }
