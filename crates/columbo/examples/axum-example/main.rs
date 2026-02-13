@@ -187,6 +187,41 @@ async fn multi_suspended_handler(
     .unwrap()
 }
 
+#[axum::debug_handler]
+async fn cancelled_handler() -> impl IntoResponse {
+  let (ctx, resp) = columbo::new();
+
+  let suspend = ctx.suspend(
+    |ctx| async move {
+      ctx.cancelled().await;
+      tracing::warn!("suspended future cancelled");
+      html! {}
+    },
+    html! { "[loading]" },
+  );
+
+  let body = html! {
+    (DOCTYPE)
+    html {
+      head;
+      body {
+        p {
+          "This will never resolve:"
+        }
+        (suspend)
+      }
+    }
+  };
+
+  let body = Body::from_stream(resp.into_stream(body));
+  Response::builder()
+    .header("Content-Type", "text/html; charset=utf-8")
+    .header("Transfer-Encoding", "chunked")
+    .header("X-Content-Type-Options", "nosniff")
+    .body(body)
+    .unwrap()
+}
+
 #[tokio::main]
 async fn main() {
   tracing_subscriber::registry()
@@ -198,7 +233,8 @@ async fn main() {
     .route("/", get(nested_handler))
     .route("/multi", get(multi_suspended_handler))
     .route("/panic", get(panicking_handler))
-    .route("/custom_panic", get(custom_panicking_handler));
+    .route("/custom_panic", get(custom_panicking_handler))
+    .route("/cancel", get(cancelled_handler));
 
   let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
   axum::serve(listener, app).await.unwrap();

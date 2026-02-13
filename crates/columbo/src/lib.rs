@@ -28,7 +28,15 @@
 //!
 //! The [`suspend()`](SuspenseContext::suspend) function provides access to
 //! itself for the futures it suspends by taking a closure returning a future,
-//! so futures can spawn additional suspensions.
+//! so futures can spawn additional suspensions or listen for cancellation.
+//!
+//! ## Cancel Safety
+//! If [`SuspendedResponse`] or the type resulting from
+//! [`into_stream()`](SuspendedResponse::into_stream) are dropped, the futures
+//! that have been suspended will continue to run, but their results will be
+//! inaccessible. If you would like for tasks to cancel, you can use
+//! [`cancelled()`](SuspenseContext::cancelled) or
+//! [`is_cancelled()`](SuspenseContext::is_cancelled) to exit early.
 //!
 //! # Axum Example
 //!
@@ -143,6 +151,7 @@
 //! receiver is turned into a stream whose elements are preceeded by the
 //! document you provide.
 
+mod cancel_on_drop;
 mod format;
 mod markup_stream;
 mod run_suspended;
@@ -158,11 +167,12 @@ use std::{
 
 use maud::Markup;
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, Span, debug, instrument, warn};
 
 use self::{
-  format::SuspensePlaceholder, markup_stream::MarkupStream,
-  run_suspended::run_suspended_future,
+  cancel_on_drop::CancelOnDrop, format::SuspensePlaceholder,
+  markup_stream::MarkupStream, run_suspended::run_suspended_future,
 };
 
 type Id = usize;
@@ -181,14 +191,20 @@ pub fn new_with_opts(
   options: ColumboOptions,
 ) -> (SuspenseContext, SuspendedResponse) {
   let (tx, rx) = mpsc::unbounded_channel();
+  let cancel = CancellationToken::new();
+
   debug!("created new suspense context and response");
   (
     SuspenseContext {
       next_id: Arc::new(AtomicUsize::new(0)),
       tx,
       opts: Arc::new(options),
+      cancel: cancel.clone(),
     },
-    SuspendedResponse { rx },
+    SuspendedResponse {
+      rx,
+      cancel: CancelOnDrop::new(cancel),
+    },
   )
 }
 
@@ -198,6 +214,7 @@ pub struct SuspenseContext {
   next_id: Arc<AtomicUsize>,
   tx:      mpsc::UnboundedSender<Markup>,
   opts:    Arc<ColumboOptions>,
+  cancel:  CancellationToken,
 }
 
 impl SuspenseContext {
@@ -233,6 +250,21 @@ impl SuspenseContext {
 
     Suspense::new(id, placeholder)
   }
+
+  /// Yields if [`SuspendedResponse`] or the resulting stream type is dropped.
+  ///
+  /// Useful for exiting from suspended futures that should stop if the
+  /// connection is dropped. Suspended futures are not aborted otherwise, so
+  /// they will continue to execute if you don't listen for cancellation.
+  pub async fn cancelled(&self) { self.cancel.cancelled().await; }
+
+  /// Returns true if [`SuspendedResponse`] or the resulting stream type is
+  /// dropped.
+  ///
+  /// Useful for exiting from suspended futures that should stop if the
+  /// connection is dropped. Suspended futures are not aborted otherwise, so
+  /// they will continue to execute if you don't listen for cancellation.
+  pub fn is_cancelled(&self) -> bool { self.cancel.is_cancelled() }
 }
 
 /// Options for configuring `columbo` suspense.
@@ -245,7 +277,8 @@ pub struct ColumboOptions {
 /// Contains suspended results. Can be turned into a byte stream with a
 /// prepended document.
 pub struct SuspendedResponse {
-  rx: mpsc::UnboundedReceiver<Markup>,
+  rx:     mpsc::UnboundedReceiver<Markup>,
+  cancel: CancelOnDrop,
 }
 
 impl SuspendedResponse {

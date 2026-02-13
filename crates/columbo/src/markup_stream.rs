@@ -10,12 +10,13 @@ use maud::Markup;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{Span, debug, trace};
 
-use crate::SuspendedResponse;
+use crate::{SuspendedResponse, cancel_on_drop::CancelOnDrop};
 
 pub struct MarkupStream {
   inner: Pin<
     Box<dyn Stream<Item = Result<Bytes, io::Error>> + Send + Sync + 'static>,
   >,
+  _cancel: CancelOnDrop,
 }
 
 impl MarkupStream {
@@ -39,7 +40,8 @@ impl MarkupStream {
 
     trace!("stream created with initial body chunk");
     MarkupStream {
-      inner: Box::pin(stream),
+      inner:   Box::pin(stream),
+      _cancel: resp.cancel,
     }
   }
 }
