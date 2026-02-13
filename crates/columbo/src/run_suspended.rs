@@ -1,19 +1,17 @@
-use std::{any::Any, panic::AssertUnwindSafe};
+use std::{panic::AssertUnwindSafe, sync::Arc};
 
 use futures::FutureExt;
 use maud::{Markup, Render};
 use tokio::sync::mpsc;
 use tracing::{trace, warn};
 
-use crate::{
-  Id,
-  format::{SuspensePanic, SuspenseReplacement},
-};
+use crate::{ColumboOptions, Id, format::SuspenseReplacement};
 
 pub(crate) async fn run_suspended_future<Fut>(
   id: Id,
   future: Fut,
   tx: mpsc::UnboundedSender<Markup>,
+  opts: Arc<ColumboOptions>,
 ) where
   Fut: Future<Output = Markup> + Send + 'static,
 {
@@ -24,9 +22,10 @@ pub(crate) async fn run_suspended_future<Fut>(
   let content = match result {
     Ok(m) => m,
     Err(panic_payload) => {
-      let error = panic_payload_to_string(&panic_payload);
-      warn!(suspense.id = %id, error, "creating error replacement due to panic");
-      SuspensePanic { error }.render()
+      warn!(suspense.id = %id, "suspended task panicked; rendering panic");
+      opts
+        .panic_renderer
+        .unwrap_or(crate::format::default_panic_renderer)(panic_payload)
     }
   };
 
@@ -40,14 +39,4 @@ pub(crate) async fn run_suspended_future<Fut>(
   let _ = tx.send(payload).inspect_err(|_| {
     trace!(suspense.id = %id, "future completed but receiver is dropped");
   });
-}
-
-fn panic_payload_to_string(payload: &dyn Any) -> String {
-  if let Some(s) = payload.downcast_ref::<&str>() {
-    return s.to_string();
-  }
-  if let Some(s) = payload.downcast_ref::<String>() {
-    return s.clone();
-  }
-  "Box<dyn Any>".to_string()
 }

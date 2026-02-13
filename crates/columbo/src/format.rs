@@ -1,3 +1,5 @@
+use std::any::Any;
+
 use maud::{Markup, PreEscaped, Render, html};
 
 use crate::Id;
@@ -47,6 +49,21 @@ impl<'a> Render for SuspenseReplacement<'a> {
       }
     }
   }
+}
+
+pub(crate) fn default_panic_renderer(panic: Box<dyn Any + Send>) -> Markup {
+  let error = panic_payload_to_string(&panic);
+  SuspensePanic { error }.render()
+}
+
+fn panic_payload_to_string(payload: &dyn Any) -> String {
+  if let Some(s) = payload.downcast_ref::<&str>() {
+    return s.to_string();
+  }
+  if let Some(s) = payload.downcast_ref::<String>() {
+    return s.clone();
+  }
+  "Box<dyn Any>".to_string()
 }
 
 pub(crate) struct SuspensePanic {

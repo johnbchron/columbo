@@ -1,4 +1,4 @@
-use std::{collections::HashMap, time::Duration};
+use std::{any::Any, collections::HashMap, time::Duration};
 
 use axum::{
   Router,
@@ -7,6 +7,7 @@ use axum::{
   response::{IntoResponse, Response},
   routing::get,
 };
+use columbo::ColumboOptions;
 use maud::{DOCTYPE, html};
 use nanorand::Rng;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
@@ -95,6 +96,43 @@ async fn panicking_handler() -> impl IntoResponse {
     .unwrap()
 }
 
+fn panic_renderer(_panic_object: Box<dyn Any + Send>) -> maud::Markup {
+  maud::html! { "panic" }
+}
+
+async fn custom_panicking_handler() -> impl IntoResponse {
+  let (ctx, resp) = columbo::new_with_opts(ColumboOptions {
+    panic_renderer: Some(panic_renderer),
+  });
+
+  // suspend a future, providing a future and a placeholder
+  let panicking_suspense = ctx.suspend(
+    // takes a closure that returns a future, allowing nested suspense
+    |_ctx| async move {
+      tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+      panic!("")
+    },
+    // placeholder replaced when result is streamed
+    maud::html! { "Loading..." },
+  );
+
+  // directly interpolate the suspense into the document
+  let document = maud::html! {
+    (panicking_suspense)
+    p { "at the disco" }
+  };
+
+  // produce a body stream with the document and suspended results
+  let stream = resp.into_stream(document);
+  let body = Body::from_stream(stream);
+  Response::builder()
+    .header("Content-Type", "text/html; charset=utf-8")
+    .header("Transfer-Encoding", "chunked")
+    .body(body)
+    .unwrap()
+}
+
 #[axum::debug_handler]
 async fn multi_suspended_handler(
   Query(q_map): Query<HashMap<String, String>>,
@@ -159,7 +197,8 @@ async fn main() {
   let app = Router::new()
     .route("/", get(nested_handler))
     .route("/multi", get(multi_suspended_handler))
-    .route("/panic", get(panicking_handler));
+    .route("/panic", get(panicking_handler))
+    .route("/custom_panic", get(custom_panicking_handler));
 
   let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
   axum::serve(listener, app).await.unwrap();

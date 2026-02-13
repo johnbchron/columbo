@@ -80,6 +80,55 @@
 //! }
 //! ```
 //!
+//! Use [`new_with_opts`] to configure `columbo` behavior:
+//! ```rust
+//! use std::any::Any;
+//!
+//! use axum::{
+//!   body::Body,
+//!   response::{IntoResponse, Response},
+//! };
+//! use columbo::ColumboOptions;
+//!
+//! fn panic_renderer(_panic_object: Box<dyn Any + Send>) -> maud::Markup {
+//!   maud::html! { "panic" }
+//! }
+//!
+//! async fn handler() -> impl IntoResponse {
+//!   let (ctx, resp) = columbo::new_with_opts(ColumboOptions {
+//!     panic_renderer: Some(panic_renderer),
+//!   });
+//!
+//!   // suspend a future, providing a future and a placeholder
+//!   let panicking_suspense = ctx.suspend(
+//!     // takes a closure that returns a future, allowing nested suspense
+//!     |_ctx| async move {
+//!       tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+//!
+//!       panic!("");
+//!       maud::html! {}
+//!     },
+//!     // placeholder replaced when result is streamed
+//!     maud::html! { "Loading..." },
+//!   );
+//!
+//!   // directly interpolate the suspense into the document
+//!   let document = maud::html! {
+//!     (panicking_suspense)
+//!     p { "at the disco" }
+//!   };
+//!
+//!   // produce a body stream with the document and suspended results
+//!   let stream = resp.into_stream(document);
+//!   let body = Body::from_stream(stream);
+//!   Response::builder()
+//!     .header("Content-Type", "text/html; charset=utf-8")
+//!     .header("Transfer-Encoding", "chunked")
+//!     .body(body)
+//!     .unwrap()
+//! }
+//! ```
+//!
 //! # Architecture
 //!
 //! Internally, [`SuspenseContext`] holds a channel sender. When
@@ -99,6 +148,7 @@ mod markup_stream;
 mod run_suspended;
 
 use std::{
+  any::Any,
   fmt,
   sync::{
     Arc,
@@ -119,14 +169,24 @@ type Id = usize;
 
 /// Creates a new [`SuspenseContext`] and [`SuspendedResponse`]. The context is
 /// for suspending futures, and the response turns into an output stream.
-#[instrument(name = "columbo::new", skip_all)]
 pub fn new() -> (SuspenseContext, SuspendedResponse) {
+  new_with_opts(ColumboOptions::default())
+}
+
+/// Creates a new [`SuspenseContext`] and [`SuspendedResponse`], with the given
+/// [`ColumboOptions`]. The context is for suspending futures, and the response
+/// turns into an output stream.
+#[instrument(name = "columbo::new", skip_all)]
+pub fn new_with_opts(
+  options: ColumboOptions,
+) -> (SuspenseContext, SuspendedResponse) {
   let (tx, rx) = mpsc::unbounded_channel();
   debug!("created new suspense context and response");
   (
     SuspenseContext {
       next_id: Arc::new(AtomicUsize::new(0)),
       tx,
+      opts: Arc::new(options),
     },
     SuspendedResponse { rx },
   )
@@ -137,6 +197,7 @@ pub fn new() -> (SuspenseContext, SuspendedResponse) {
 pub struct SuspenseContext {
   next_id: Arc<AtomicUsize>,
   tx:      mpsc::UnboundedSender<Markup>,
+  opts:    Arc<ColumboOptions>,
 }
 
 impl SuspenseContext {
@@ -161,12 +222,24 @@ impl SuspenseContext {
     Span::current().record("suspense.id", id.to_string());
 
     tokio::spawn(
-      run_suspended_future(id, f(self.clone()), self.tx.clone())
-        .instrument(tracing::info_span!("columbo::suspended_task",)),
+      run_suspended_future(
+        id,
+        f(self.clone()),
+        self.tx.clone(),
+        self.opts.clone(),
+      )
+      .instrument(tracing::info_span!("columbo::suspended_task",)),
     );
 
     Suspense::new(id, placeholder)
   }
+}
+
+/// Options for configuring `columbo` suspense.
+#[derive(Clone, Debug, Default)]
+pub struct ColumboOptions {
+  /// Renders a panic fallback given the panic object.
+  pub panic_renderer: Option<fn(Box<dyn Any + Send>) -> Markup>,
 }
 
 /// Contains suspended results. Can be turned into a byte stream with a
