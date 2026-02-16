@@ -1,21 +1,21 @@
 use std::{panic::AssertUnwindSafe, sync::Arc};
 
 use futures::FutureExt;
-use maud::{Markup, Render};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{trace, warn};
 
-use crate::{ColumboOptions, Id, format::SuspenseReplacement};
+use crate::{ColumboOptions, Html, Id, format};
 
-pub(crate) async fn run_suspended_future<Fut>(
+pub(crate) async fn run_suspended_future<Fut, M>(
   id: Id,
   future: Fut,
-  tx: mpsc::UnboundedSender<Markup>,
+  tx: mpsc::UnboundedSender<Html>,
   opts: Arc<ColumboOptions>,
   cancel: CancellationToken,
 ) where
-  Fut: Future<Output = Markup> + Send + 'static,
+  Fut: Future<Output = M> + Send + 'static,
+  M: Into<Html>,
 {
   let auto_cancel = opts.auto_cancel.unwrap_or(false);
 
@@ -35,8 +35,8 @@ pub(crate) async fn run_suspended_future<Fut>(
   };
 
   // determine what to swap in
-  let content = match result {
-    Ok(m) => m,
+  let content: Html = match result {
+    Ok(m) => m.into(),
     Err(panic_payload) => {
       warn!(suspense.id = %id, "suspended task panicked; rendering panic");
       opts
@@ -45,12 +45,8 @@ pub(crate) async fn run_suspended_future<Fut>(
     }
   };
 
-  // render the wrapper and script
-  let payload = SuspenseReplacement {
-    id:    &id,
-    inner: &content,
-  }
-  .render();
+  // render the wrapper
+  let payload = format::render_replacement(&id, &content);
 
   let _ = tx.send(payload).inspect_err(|_| {
     trace!(suspense.id = %id, "future completed but receiver is dropped");

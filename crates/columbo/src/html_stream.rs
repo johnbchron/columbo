@@ -6,30 +6,26 @@ use std::{
 
 use bytes::Bytes;
 use futures::{Stream, StreamExt, stream::once};
-use maud::{Markup, html};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{Span, debug, trace};
 
-use crate::{
-  SuspendedResponse, cancel_on_drop::CancelOnDrop, format::GlobalSuspenseScript,
-};
+use crate::{Html, SuspendedResponse, cancel_on_drop::CancelOnDrop, format};
 
-pub struct MarkupStream {
+pub struct HtmlStream {
   inner: Pin<
     Box<dyn Stream<Item = Result<Bytes, io::Error>> + Send + Sync + 'static>,
   >,
   _cancel: CancelOnDrop,
 }
 
-impl MarkupStream {
-  pub(crate) fn new(resp: SuspendedResponse, main_chunk: Markup) -> Self {
-    let main_chunk = html! {
-      (main_chunk)
-      (GlobalSuspenseScript)
-    };
+impl HtmlStream {
+  pub(crate) fn new(resp: SuspendedResponse, main_chunk: Html) -> Self {
+    let script = format::render_global_script();
+    let main_chunk =
+      Html::new(format!("{}{}", main_chunk.as_str(), script.as_str()));
 
-    // stream of markup chunks, including initial body
-    let markup_stream = once(async move { main_chunk })
+    // stream of Html chunks, including initial body
+    let html_stream = once(async move { main_chunk })
       .chain(UnboundedReceiverStream::new(resp.rx));
 
     let parent_span = Span::current();
@@ -41,19 +37,19 @@ impl MarkupStream {
       .flatten();
 
     // final stream, adapted to IO convention
-    let stream = markup_stream
+    let stream = html_stream
       .map(|c| Ok(Bytes::from(c.into_string())))
       .chain(stream_end);
 
     trace!("stream created with initial body chunk");
-    MarkupStream {
+    HtmlStream {
       inner:   Box::pin(stream),
       _cancel: resp.cancel,
     }
   }
 }
 
-impl Stream for MarkupStream {
+impl Stream for HtmlStream {
   type Item = Result<Bytes, io::Error>;
 
   fn poll_next(

@@ -7,7 +7,7 @@ use axum::{
   response::{IntoResponse, Response},
   routing::get,
 };
-use columbo::ColumboOptions;
+use columbo::{ColumboOptions, Html};
 use maud::{DOCTYPE, html};
 use nanorand::Rng;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
@@ -67,7 +67,9 @@ async fn panicking_handler() -> impl IntoResponse {
   let panicking_suspend = ctx.suspend(
     |_ctx| async move {
       tokio::time::sleep(Duration::from_secs(1)).await;
-      panic!("I don't know! The programmer told me to panic!")
+      panic!("I don't know! The programmer told me to panic!");
+      #[allow(unreachable_code)]
+      Html::new("")
     },
     html! {
       "loading..."
@@ -96,8 +98,8 @@ async fn panicking_handler() -> impl IntoResponse {
     .unwrap()
 }
 
-fn panic_renderer(_panic_object: Box<dyn Any + Send>) -> maud::Markup {
-  maud::html! { "panic" }
+fn panic_renderer(_panic_object: Box<dyn Any + Send>) -> Html {
+  Html::new("panic")
 }
 
 async fn custom_panicking_handler() -> impl IntoResponse {
@@ -111,8 +113,9 @@ async fn custom_panicking_handler() -> impl IntoResponse {
     // takes a closure that returns a future, allowing nested suspense
     |_ctx| async move {
       tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-
-      panic!("")
+      panic!("");
+      #[allow(unreachable_code)]
+      Html::new("")
     },
     // placeholder replaced when result is streamed
     maud::html! { "Loading..." },
@@ -196,9 +199,9 @@ async fn manually_cancelled_handler() -> impl IntoResponse {
     |ctx| async move {
       ctx.cancelled().await;
       tracing::warn!("suspended future cancelled");
-      html! {}
+      Html::new("")
     },
-    html! { "[loading]" },
+    "[loading]",
   );
 
   let body = html! {

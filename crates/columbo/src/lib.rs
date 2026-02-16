@@ -48,6 +48,7 @@
 //!   body::Body,
 //!   response::{IntoResponse, Response},
 //! };
+//! use columbo::Html;
 //!
 //! async fn handler() -> impl IntoResponse {
 //!   // columbo entrypoint
@@ -59,26 +60,18 @@
 //!     |_ctx| async move {
 //!       tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 //!
-//!       // the future's output is markup
-//!       maud::html! {
-//!         p { "Good things come to those who wait." }
-//!       }
+//!       // the future's output is Html
+//!       Html::new("<p>Good things come to those who wait.</p>")
 //!     },
 //!     // placeholder replaced when result is streamed
-//!     maud::html! { "Loading..." },
+//!     "Loading...",
 //!   );
 //!
 //!   // directly interpolate the suspense into the document
-//!   let document = maud::html! {
-//!     (maud::DOCTYPE)
-//!     html {
-//!       head;
-//!       body {
-//!         p { "Aphorism incoming..." }
-//!         (suspense)
-//!       }
-//!     }
-//!   };
+//!   let document = format!(
+//!     "<!DOCTYPE html><html><head></head><body><p>Aphorism \
+//!      incoming...</p>{suspense}</body></html>"
+//!   );
 //!
 //!   // produce a body stream with the document and suspended results
 //!   let stream = resp.into_stream(document);
@@ -99,10 +92,10 @@
 //!   body::Body,
 //!   response::{IntoResponse, Response},
 //! };
-//! use columbo::ColumboOptions;
+//! use columbo::{ColumboOptions, Html};
 //!
-//! fn panic_renderer(_panic_object: Box<dyn Any + Send>) -> maud::Markup {
-//!   maud::html! { "panic" }
+//! fn panic_renderer(_panic_object: Box<dyn Any + Send>) -> Html {
+//!   Html::new("panic")
 //! }
 //!
 //! async fn handler() -> impl IntoResponse {
@@ -118,17 +111,15 @@
 //!       tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 //!
 //!       panic!("");
-//!       maud::html! {}
+//!       #[allow(unreachable_code)]
+//!       Html::new("")
 //!     },
 //!     // placeholder replaced when result is streamed
-//!     maud::html! { "Loading..." },
+//!     "Loading...",
 //!   );
 //!
 //!   // directly interpolate the suspense into the document
-//!   let document = maud::html! {
-//!     (panicking_suspense)
-//!     p { "at the disco" }
-//!   };
+//!   let document = format!("{panicking_suspense}<p>at the disco</p>");
 //!
 //!   // produce a body stream with the document and suspended results
 //!   let stream = resp.into_stream(document);
@@ -157,8 +148,12 @@
 
 mod cancel_on_drop;
 mod format;
-mod markup_stream;
+mod html;
+mod html_stream;
 mod run_suspended;
+
+#[cfg(test)]
+mod tests;
 
 use std::{
   any::Any,
@@ -169,14 +164,14 @@ use std::{
   },
 };
 
-use maud::Markup;
+pub use html::Html;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, Span, debug, instrument, warn};
 
 use self::{
-  cancel_on_drop::CancelOnDrop, format::SuspensePlaceholder,
-  markup_stream::MarkupStream, run_suspended::run_suspended_future,
+  cancel_on_drop::CancelOnDrop, html_stream::HtmlStream,
+  run_suspended::run_suspended_future,
 };
 
 type Id = usize;
@@ -216,7 +211,7 @@ pub fn new_with_opts(
 #[derive(Clone)]
 pub struct SuspenseContext {
   next_id: Arc<AtomicUsize>,
-  tx:      mpsc::UnboundedSender<Markup>,
+  tx:      mpsc::UnboundedSender<Html>,
   opts:    Arc<ColumboOptions>,
   cancel:  CancellationToken,
 }
@@ -234,10 +229,15 @@ impl SuspenseContext {
   ///
   /// Suspended futures must be `Send` because they are handed to `tokio`.
   #[instrument(name = "columbo::suspend", skip_all, fields(suspense.id))]
-  pub fn suspend<F, Fut>(&self, f: F, placeholder: Markup) -> Suspense
+  pub fn suspend<F, Fut, M>(
+    &self,
+    f: F,
+    placeholder: impl Into<Html>,
+  ) -> Suspense
   where
     F: FnOnce(SuspenseContext) -> Fut,
-    Fut: Future<Output = Markup> + Send + 'static,
+    Fut: Future<Output = M> + Send + 'static,
+    M: Into<Html> + 'static,
   {
     let id = self.new_id();
     Span::current().record("suspense.id", id.to_string());
@@ -253,7 +253,7 @@ impl SuspenseContext {
       .instrument(tracing::info_span!("columbo::suspended_task",)),
     );
 
-    Suspense::new(id, placeholder)
+    Suspense::new(id, placeholder.into())
   }
 
   /// Yields if [`SuspendedResponse`] or the resulting stream type is dropped.
@@ -276,7 +276,7 @@ impl SuspenseContext {
 #[derive(Clone, Debug, Default)]
 pub struct ColumboOptions {
   /// Renders a panic fallback given the panic object.
-  pub panic_renderer: Option<fn(Box<dyn Any + Send>) -> Markup>,
+  pub panic_renderer: Option<fn(Box<dyn Any + Send>) -> Html>,
   /// Whether to automatically cancel suspended futures at the next await bound
   /// when the response is dropped.
   pub auto_cancel:    Option<bool>,
@@ -285,23 +285,23 @@ pub struct ColumboOptions {
 /// Contains suspended results. Can be turned into a byte stream with a
 /// prepended document.
 pub struct SuspendedResponse {
-  rx:     mpsc::UnboundedReceiver<Markup>,
+  rx:     mpsc::UnboundedReceiver<Html>,
   cancel: CancelOnDrop,
 }
 
 impl SuspendedResponse {
   /// Turns the `SuspendedResponse` into a stream for sending as a response.
   #[instrument(name = "columbo::into_stream", skip_all)]
-  pub fn into_stream(self, body: Markup) -> MarkupStream {
+  pub fn into_stream(self, body: impl Into<Html>) -> HtmlStream {
     debug!("converting suspended response into stream");
-    MarkupStream::new(self, body)
+    HtmlStream::new(self, body.into())
   }
 }
 
 /// A suspended future. Can be interpolated into markup as the placeholder.
 pub struct Suspense {
   id:          Id,
-  placeholder: Markup,
+  placeholder: Html,
 }
 
 impl fmt::Debug for Suspense {
@@ -311,15 +311,23 @@ impl fmt::Debug for Suspense {
 }
 
 impl Suspense {
-  fn new(id: Id, placeholder: Markup) -> Self { Suspense { id, placeholder } }
+  fn new(id: Id, placeholder: Html) -> Self { Suspense { id, placeholder } }
+
+  /// Render the placeholder HTML.
+  pub fn render_to_html(&self) -> Html {
+    format::render_placeholder(&self.id, &self.placeholder)
+  }
 }
 
+impl fmt::Display for Suspense {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    f.write_str(self.render_to_html().as_str())
+  }
+}
+
+#[cfg(feature = "maud")]
 impl maud::Render for Suspense {
   fn render(&self) -> maud::Markup {
-    SuspensePlaceholder {
-      id:    &self.id,
-      inner: &self.placeholder,
-    }
-    .render()
+    maud::PreEscaped(self.render_to_html().into_string())
   }
 }
