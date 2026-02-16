@@ -1,5 +1,3 @@
-#![feature(box_into_inner)]
-
 //! Provides SSR suspense capabilities. Render a placeholder for a future, and
 //! stream the replacement elements.
 //!
