@@ -1,7 +1,6 @@
 use tokio_util::sync::CancellationToken;
 
 /// A wrapper around [`CancellationToken`] that calls `cancel()` when dropped.
-#[derive(Clone)]
 pub(crate) struct CancelOnDrop {
   inner: CancellationToken,
 }
