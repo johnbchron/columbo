@@ -7,8 +7,6 @@ pub(crate) struct CancelOnDrop {
 
 impl CancelOnDrop {
   pub(crate) fn new(inner: CancellationToken) -> Self { CancelOnDrop { inner } }
-
-  pub(crate) fn inner(&self) -> &CancellationToken { &self.inner }
 }
 
 impl Drop for CancelOnDrop {
