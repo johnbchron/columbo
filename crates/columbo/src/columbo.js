@@ -1,4 +1,8 @@
 (function() {
+  // Only initialize once, even if this script appears multiple times in the DOM
+  if (window.__columbo) return;
+  window.__columbo = true;
+
   // Track templates waiting to be swapped in
   const pendingIds = new Set();
   // Prevent scheduling multiple microtasks for the same batch
