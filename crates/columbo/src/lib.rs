@@ -108,6 +108,7 @@
 //! async fn handler() -> impl IntoResponse {
 //!   let (ctx, resp) = columbo::new_with_opts(ColumboOptions {
 //!     panic_renderer: Some(panic_renderer),
+//!     ..Default::default()
 //!   });
 //!
 //!   // suspend a future, providing a future and a placeholder
