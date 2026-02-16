@@ -152,7 +152,7 @@
 //!
 //! [`SuspendedResponse`] contains a receiver. It just sits around until you
 //! call [`into_stream()`](SuspendedResponse::into_stream), at which point the
-//! receiver is turned into a stream whose elements are preceeded by the
+//! receiver is turned into a stream whose elements are preceded by the
 //! document you provide.
 
 mod cancel_on_drop;
