@@ -48,6 +48,7 @@
         packages = [ (toolchain_fn pkgs) pkgs.gcc ];
         motd = "\n  Welcome to the {2}columbo{reset} shell.\n";
       };
+
       checks = {
         inherit columbo;
         columbo-clippy = craneLib.cargoClippy (columbo_args // {
