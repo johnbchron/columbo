@@ -9,8 +9,8 @@
     const p = document.querySelector(`[data-columbo-p-id="${id}"]`);
     const r = document.querySelector(`[data-columbo-r-id="${id}"]`);
     
-    if (p && r && p.parentNode) {
-      p.parentNode.replaceChild(r.content, p);
+    if (p && r) {
+      p.replaceWith(...r.content.childNodes);
       r.remove();
     }
   };
