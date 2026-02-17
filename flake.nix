@@ -23,11 +23,12 @@
       craneLib = (crane.mkLib pkgs).overrideToolchain toolchain_fn;
 
       js_filter = path: _type: builtins.match ".*js$" path != null;
-      js_or_cargo = path: type:
-        (js_filter path type) || (craneLib.filterCargoSources path type);
+      md_filter = path: _type: builtins.match ".*md$" path != null;
+      filter = path: type:
+        (js_filter path type) || (md_filter path type) || (craneLib.filterCargoSources path type);
       src = pkgs.lib.cleanSourceWith {
         src = ./.;
-        filter = js_or_cargo;
+        inherit filter;
         name = "source";
       };
 
