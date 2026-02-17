@@ -4,7 +4,6 @@ mod cancel_on_drop;
 mod format;
 mod html;
 mod html_stream;
-mod run_suspended;
 
 #[cfg(test)]
 mod tests;
@@ -12,21 +11,20 @@ mod tests;
 use std::{
   any::Any,
   fmt,
+  panic::AssertUnwindSafe,
   sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
   },
 };
 
+use futures::FutureExt;
 pub use html::Html;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::{Instrument, Span, debug, instrument, warn};
+use tracing::{Instrument, Span, debug, instrument, trace, warn};
 
-use self::{
-  cancel_on_drop::CancelOnDrop, html_stream::HtmlStream,
-  run_suspended::run_suspended_future,
-};
+use self::{cancel_on_drop::CancelOnDrop, html_stream::HtmlStream};
 
 type Id = usize;
 
@@ -100,14 +98,10 @@ impl SuspenseContext {
     Span::current().record("suspense.id", id.to_string());
 
     tokio::spawn(
-      run_suspended_future(
-        id,
-        f(self.clone()),
-        self.tx.clone(),
-        self.opts.clone(),
-        self.cancel.clone(),
-      )
-      .instrument(tracing::info_span!("columbo::suspended_task",)),
+      self
+        .clone()
+        .run_suspended(id, f(self.clone()))
+        .instrument(tracing::info_span!("columbo::suspended_task")),
     );
 
     Suspense::new(id, placeholder.into())
@@ -127,6 +121,49 @@ impl SuspenseContext {
   /// connection is dropped. Suspended futures are not aborted otherwise, so
   /// they will continue to execute if you don't listen for cancellation.
   pub fn is_cancelled(&self) -> bool { self.cancel.is_cancelled() }
+
+  async fn run_suspended<Fut, M>(self, id: Id, future: Fut)
+  where
+    Fut: Future<Output = M> + Send + 'static,
+    M: Into<Html>,
+  {
+    let auto_cancel = self.opts.auto_cancel.unwrap_or(false);
+
+    // catch panics in future
+    let future = AssertUnwindSafe(future).catch_unwind();
+    // race the future against the cancellation token
+    let result = if auto_cancel {
+      tokio::select! {
+        _ = self.cancel.cancelled() => {
+          trace!(suspense.id = %id, "task exited via auto_cancel");
+          return; // exit immediately; nothing to send
+        }
+        result = future => result,
+      }
+    } else {
+      future.await
+    };
+
+    // determine what to swap in
+    let panic_handler = self
+      .opts
+      .panic_renderer
+      .unwrap_or(crate::format::default_panic_renderer);
+    let content: Html = match result {
+      Ok(m) => m.into(),
+      Err(panic_payload) => {
+        warn!(suspense.id = %id, "suspended task panicked; rendering panic");
+        panic_handler(panic_payload)
+      }
+    };
+
+    // render the wrapper
+    let payload = format::render_replacement(&id, &content);
+
+    let _ = self.tx.send(payload).inspect_err(|_| {
+      trace!(suspense.id = %id, "future completed but receiver is dropped");
+    });
+  }
 }
 
 /// Options for configuring `columbo` suspense.
