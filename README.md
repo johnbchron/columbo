@@ -50,7 +50,6 @@ use axum::{
   body::Body,
   response::{IntoResponse, Response},
 };
-use columbo::Html;
 
 async fn handler() -> impl IntoResponse {
   // columbo entrypoint
@@ -62,8 +61,8 @@ async fn handler() -> impl IntoResponse {
     |_ctx| async move {
       tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
-      // the future's output is Html
-      Html::new("<p>Good things come to those who wait.</p>")
+      // the future can return any type that implements Into<Html>
+      "<p>Good things come to those who wait.</p>"
     },
     // placeholder replaced when result is streamed
     "Loading...",
@@ -114,7 +113,7 @@ async fn handler() -> impl IntoResponse {
 
       panic!("");
       #[allow(unreachable_code)]
-      Html::new("")
+      ""
     },
     // placeholder replaced when result is streamed
     "Loading...",

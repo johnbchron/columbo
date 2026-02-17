@@ -81,6 +81,9 @@ impl SuspenseContext {
   /// placeholder is sent immediately, while the future output is streamed and
   /// replaces the placeholder in the browser.
   ///
+  /// The future can return any type that implements [`Into<Html>`], including
+  /// `String`, `&str`, or types like `maud::Markup`.
+  ///
   /// Suspended futures must be `Send` because they are handed to `tokio`.
   #[instrument(name = "columbo::suspend", skip_all, fields(suspense.id))]
   pub fn suspend<F, Fut, M>(

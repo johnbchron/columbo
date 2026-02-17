@@ -69,7 +69,7 @@ async fn panicking_handler() -> impl IntoResponse {
       tokio::time::sleep(Duration::from_secs(1)).await;
       panic!("I don't know! The programmer told me to panic!");
       #[allow(unreachable_code)]
-      Html::new("")
+      ""
     },
     html! {
       "loading..."
@@ -115,7 +115,7 @@ async fn custom_panicking_handler() -> impl IntoResponse {
       tokio::time::sleep(std::time::Duration::from_secs(2)).await;
       panic!("");
       #[allow(unreachable_code)]
-      Html::new("")
+      ""
     },
     // placeholder replaced when result is streamed
     maud::html! { "Loading..." },
@@ -199,7 +199,7 @@ async fn manually_cancelled_handler() -> impl IntoResponse {
     |ctx| async move {
       ctx.cancelled().await;
       tracing::warn!("suspended future cancelled");
-      Html::new("")
+      ""
     },
     "[loading]",
   );
