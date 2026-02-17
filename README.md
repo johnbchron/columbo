@@ -133,6 +133,77 @@ async fn handler() -> impl IntoResponse {
 }
 ```
 
+## Integrations
+
+Both integrations are enabled by default. Disable them individually via
+`default-features = false` and re-enable selectively with `features = ["axum"]`
+or `features = ["maud"]`.
+
+### Axum (`feature = "axum"`)
+
+The `axum` feature implements `IntoResponse` for [`HtmlStream`], the type
+returned by [`into_stream()`](SuspendedResponse::into_stream). This means you
+can return the stream directly from an Axum handler — no manual `Response`
+construction required:
+
+```rust
+use axum::response::IntoResponse;
+
+async fn handler() -> impl IntoResponse {
+  let (ctx, resp) = columbo::new();
+
+  let suspense = ctx.suspend(
+    |_ctx| async move {
+      tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+      "<p>Done.</p>"
+    },
+    "Loading...",
+  );
+
+  let document = format!("<html><body>{suspense}</body></html>");
+  resp.into_stream(document) // implements IntoResponse directly
+}
+```
+
+The response is automatically sent with `Content-Type: text/html; charset=utf-8`
+and `X-Content-Type-Options: nosniff`.
+
+### Maud (`feature = "maud"`)
+
+The `maud` feature adds two conveniences:
+
+1. **`maud::Markup` → `Html`**: `maud::Markup` implements `Into<Html>`, so
+   `html! { ... }` blocks can be passed directly as futures' return values or
+   as placeholders.
+
+2. **`Suspense` implements `maud::Render`**: [`Suspense`] values can be
+   interpolated directly into `html! { ... }` macros with `(suspense)`.
+
+```rust
+use maud::{DOCTYPE, html};
+
+async fn handler() -> impl IntoResponse {
+  let (ctx, resp) = columbo::new();
+
+  let suspense = ctx.suspend(
+    |_ctx| async move {
+      tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+      html! { p { "Loaded!" } } // maud::Markup accepted directly
+    },
+    html! { "[loading]" },      // placeholder also accepts maud::Markup
+  );
+
+  let document = html! {       // Suspense interpolates via maud::Render
+    (DOCTYPE)
+    html {
+      body { (suspense) }
+    }
+  };
+
+  resp.into_stream(document)
+}
+```
+
 ## Architecture
 
 Internally, [`SuspenseContext`] holds a channel sender. When
