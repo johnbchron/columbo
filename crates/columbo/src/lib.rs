@@ -4,6 +4,7 @@ mod cancel_on_drop;
 mod format;
 mod html;
 mod html_stream;
+mod resp_adapter;
 
 #[cfg(test)]
 mod tests;

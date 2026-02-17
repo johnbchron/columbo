@@ -1,12 +1,6 @@
 use std::{any::Any, collections::HashMap, time::Duration};
 
-use axum::{
-  Router,
-  body::Body,
-  extract::Query,
-  response::{IntoResponse, Response},
-  routing::get,
-};
+use axum::{Router, extract::Query, response::IntoResponse, routing::get};
 use columbo::{ColumboOptions, Html};
 use maud::{DOCTYPE, html};
 use nanorand::Rng;
@@ -38,7 +32,7 @@ async fn nested_handler() -> impl IntoResponse {
     html! { "[loading]" },
   );
 
-  let body = html! {
+  let document = html! {
     (DOCTYPE)
     html {
       head;
@@ -51,13 +45,7 @@ async fn nested_handler() -> impl IntoResponse {
     }
   };
 
-  let body = Body::from_stream(resp.into_stream(body));
-  Response::builder()
-    .header("Content-Type", "text/html; charset=utf-8")
-    .header("Transfer-Encoding", "chunked")
-    .header("X-Content-Type-Options", "nosniff")
-    .body(body)
-    .unwrap()
+  resp.into_stream(document)
 }
 
 #[axum::debug_handler]
@@ -76,7 +64,7 @@ async fn panicking_handler() -> impl IntoResponse {
     },
   );
 
-  let body = html! {
+  let document = html! {
     (DOCTYPE)
     html {
       head;
@@ -89,13 +77,7 @@ async fn panicking_handler() -> impl IntoResponse {
     }
   };
 
-  let body = Body::from_stream(resp.into_stream(body));
-  Response::builder()
-    .header("Content-Type", "text/html; charset=utf-8")
-    .header("Transfer-Encoding", "chunked")
-    .header("X-Content-Type-Options", "nosniff")
-    .body(body)
-    .unwrap()
+  resp.into_stream(document)
 }
 
 fn panic_renderer(_panic_object: Box<dyn Any + Send>) -> Html {
@@ -128,13 +110,7 @@ async fn custom_panicking_handler() -> impl IntoResponse {
   };
 
   // produce a body stream with the document and suspended results
-  let stream = resp.into_stream(document);
-  let body = Body::from_stream(stream);
-  Response::builder()
-    .header("Content-Type", "text/html; charset=utf-8")
-    .header("Transfer-Encoding", "chunked")
-    .body(body)
-    .unwrap()
+  resp.into_stream(document)
 }
 
 #[axum::debug_handler]
@@ -167,7 +143,7 @@ async fn multi_suspended_handler(
     })
     .collect::<Vec<_>>();
 
-  let stream = resp.into_stream(html! {
+  let document = html! {
     (DOCTYPE)
     html {
       head;
@@ -180,15 +156,8 @@ async fn multi_suspended_handler(
         }
       }
     }
-  });
-
-  let body = Body::from_stream(stream);
-  Response::builder()
-    .header("Content-Type", "text/html; charset=utf-8")
-    .header("Transfer-Encoding", "chunked")
-    .header("X-Content-Type-Options", "nosniff")
-    .body(body)
-    .unwrap()
+  };
+  resp.into_stream(document)
 }
 
 #[axum::debug_handler]
@@ -204,7 +173,7 @@ async fn manually_cancelled_handler() -> impl IntoResponse {
     "[loading]",
   );
 
-  let body = html! {
+  let document = html! {
     (DOCTYPE)
     html {
       head;
@@ -217,13 +186,7 @@ async fn manually_cancelled_handler() -> impl IntoResponse {
     }
   };
 
-  let body = Body::from_stream(resp.into_stream(body));
-  Response::builder()
-    .header("Content-Type", "text/html; charset=utf-8")
-    .header("Transfer-Encoding", "chunked")
-    .header("X-Content-Type-Options", "nosniff")
-    .body(body)
-    .unwrap()
+  resp.into_stream(document)
 }
 
 #[axum::debug_handler]
@@ -242,7 +205,7 @@ async fn auto_cancelled_handler() -> impl IntoResponse {
     html! { "[loading]" },
   );
 
-  let body = html! {
+  let document = html! {
     (DOCTYPE)
     html {
       head;
@@ -255,13 +218,7 @@ async fn auto_cancelled_handler() -> impl IntoResponse {
     }
   };
 
-  let body = Body::from_stream(resp.into_stream(body));
-  Response::builder()
-    .header("Content-Type", "text/html; charset=utf-8")
-    .header("Transfer-Encoding", "chunked")
-    .header("X-Content-Type-Options", "nosniff")
-    .body(body)
-    .unwrap()
+  resp.into_stream(document)
 }
 
 #[tokio::main]
