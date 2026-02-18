@@ -141,7 +141,7 @@ or `features = ["maud"]`.
 
 ### Axum (`feature = "axum"`)
 
-The `axum` feature implements `IntoResponse` for [`HtmlStream`], the type
+The `axum` feature implements `IntoResponse` for `HtmlStream`, the type
 returned by [`into_stream()`](SuspendedResponse::into_stream). This means you
 can return the stream directly from an Axum handler — no manual `Response`
 construction required:
