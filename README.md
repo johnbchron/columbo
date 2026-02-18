@@ -181,6 +181,7 @@ The `maud` feature adds two conveniences:
 
 ```rust
 use maud::{DOCTYPE, html};
+use axum::response::IntoResponse;
 
 async fn handler() -> impl IntoResponse {
   let (ctx, resp) = columbo::new();
