@@ -20,7 +20,12 @@ pub struct HtmlStream {
 
 impl HtmlStream {
   pub(crate) fn new(resp: SuspendedResponse, main_chunk: Html) -> Self {
-    let script = format::render_global_script();
+    // include the script conditionally
+    let include_script = resp.opts.include_script.unwrap_or(true);
+    let script = include_script
+      .then(format::render_global_script)
+      .unwrap_or_default();
+
     let main_chunk =
       Html::new(format!("{}{}", main_chunk.as_str(), script.as_str()));
 

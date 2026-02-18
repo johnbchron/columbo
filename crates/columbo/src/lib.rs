@@ -45,17 +45,19 @@ pub fn new_with_opts(
 ) -> (SuspenseContext, SuspendedResponse) {
   let (tx, rx) = mpsc::unbounded_channel();
   let cancel = CancellationToken::new();
+  let opts = Arc::new(options);
 
   debug!("created new suspense context and response");
   (
     SuspenseContext {
       next_id: Arc::new(AtomicUsize::new(0)),
       tx,
-      opts: Arc::new(options),
+      opts: opts.clone(),
       cancel: cancel.clone(),
     },
     SuspendedResponse {
       rx,
+      opts,
       cancel: CancelOnDrop::new(cancel),
     },
   )
@@ -174,14 +176,19 @@ pub struct ColumboOptions {
   /// Renders a panic fallback given the panic object.
   pub panic_renderer: Option<fn(Box<dyn Any + Send>) -> Html>,
   /// Whether to automatically cancel suspended futures at the next await bound
-  /// when the response is dropped.
+  /// when the response is dropped. Defaults to false.
   pub auto_cancel:    Option<bool>,
+  /// Whether to include the replacement script in the stream. If true, it will
+  /// be included after the document and before the replacements. Defaults to
+  /// true.
+  pub include_script: Option<bool>,
 }
 
 /// Contains suspended results. Can be turned into a byte stream with a
 /// prepended document.
 pub struct SuspendedResponse {
   rx:     mpsc::UnboundedReceiver<Html>,
+  opts:   Arc<ColumboOptions>,
   cancel: CancelOnDrop,
 }
 
