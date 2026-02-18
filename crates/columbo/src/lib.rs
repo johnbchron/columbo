@@ -25,6 +25,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, Span, debug, instrument, trace, warn};
 
+pub use self::format::GLOBAL_SCRIPT_CONTENTS;
 use self::{cancel_on_drop::CancelOnDrop, html_stream::HtmlStream};
 
 type Id = usize;

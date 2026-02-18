@@ -2,7 +2,8 @@ use std::any::Any;
 
 use crate::{Html, Id};
 
-const GLOBAL_SCRIPT_CONTENTS: &str = include_str!("./columbo.js");
+/// The contents of the script that performs the on-the-fly replacements.
+pub const GLOBAL_SCRIPT_CONTENTS: &str = include_str!("./columbo.js");
 
 pub(crate) fn render_placeholder(id: &Id, inner: &Html) -> Html {
   Html::new(format!(
