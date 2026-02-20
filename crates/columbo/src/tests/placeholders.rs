@@ -6,7 +6,7 @@ use super::*;
 async fn ids_match_between_placeholder_and_replacement() {
   let (ctx, resp) = crate::new();
 
-  let suspense = ctx.suspend(|_| async { Html::new("done") }, "wait");
+  let suspense = ctx.suspend(async { Html::new("done") }, "wait");
 
   let document = format!("{suspense}");
   drop(ctx);
@@ -27,8 +27,8 @@ async fn ids_match_between_placeholder_and_replacement() {
 async fn global_script_injected_once() {
   let (ctx, resp) = crate::new();
 
-  ctx.suspend(|_| async { Html::new("a") }, "...");
-  ctx.suspend(|_| async { Html::new("b") }, "...");
+  ctx.suspend(async { Html::new("a") }, "...");
+  ctx.suspend(async { Html::new("b") }, "...");
 
   drop(ctx);
   let output = collect_stream(resp.into_stream("")).await;

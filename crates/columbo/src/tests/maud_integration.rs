@@ -12,7 +12,7 @@ async fn basic_suspend_and_stream() {
   let (ctx, resp) = crate::new();
 
   let suspense = ctx.suspend(
-    |_ctx| async {
+    async {
       html! { p { "hello world" } }
     },
     html! { "loading..." },
@@ -40,7 +40,7 @@ async fn maud_render_impl_on_suspense() {
   let (ctx, resp) = crate::new();
 
   let suspense = ctx.suspend(
-    |_| async {
+    async {
       html! { "done" }
     },
     html! { "wait" },
@@ -67,14 +67,14 @@ async fn streaming_completion_order() {
   let (ctx, resp) = crate::new();
 
   ctx.suspend(
-    |_| async {
+    async {
       tokio::time::sleep(Duration::from_millis(100)).await;
       html! { "slow" }
     },
     "...",
   );
   ctx.suspend(
-    |_| async {
+    async {
       tokio::time::sleep(Duration::from_millis(10)).await;
       html! { "fast" }
     },
@@ -101,7 +101,7 @@ async fn first_chunk_is_document() {
   let (ctx, resp) = crate::new();
 
   ctx.suspend(
-    |_| async {
+    async {
       tokio::time::sleep(Duration::from_millis(50)).await;
       html! { "delayed" }
     },
@@ -130,14 +130,17 @@ async fn nested_suspense() {
   let (ctx, resp) = crate::new();
 
   ctx.suspend(
-    |inner_ctx| async move {
-      inner_ctx.suspend(
-        |_| async {
-          html! { "nested-child" }
-        },
-        "child-loading",
-      );
-      html! { "parent-result" }
+    {
+      let ctx = ctx.clone();
+      async move {
+        ctx.suspend(
+          async {
+            html! { "nested-child" }
+          },
+          "child-loading",
+        );
+        html! { "parent-result" }
+      }
     },
     "parent-loading",
   );
@@ -165,7 +168,7 @@ async fn custom_panic_renderer() {
   });
 
   ctx.suspend(
-    |_| async {
+    async {
       panic!("boom");
       #[allow(unreachable_code)]
       Html::new("")

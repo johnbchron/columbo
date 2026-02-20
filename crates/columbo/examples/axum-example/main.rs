@@ -11,21 +11,24 @@ async fn nested_handler() -> impl IntoResponse {
   let (ctx, resp) = columbo::new();
 
   let long_suspend = ctx.suspend(
-    |ctx| async move {
-      tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    {
+      let ctx = ctx.clone();
+      async move {
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
-      let longer_suspend = ctx.suspend(
-        |_ctx| async move {
-          tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-          html! { "I waited 3 seconds!" }
-        },
-        html! { "[loading]" },
-      );
+        let longer_suspend = ctx.suspend(
+          async move {
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            html! { "I waited 3 seconds!" }
+          },
+          html! { "[loading]" },
+        );
 
-      html! {
-        div {
-          "I waited 2 seconds! But there's more: "
-          (longer_suspend)
+        html! {
+          div {
+            "I waited 2 seconds! But there's more: "
+            (longer_suspend)
+          }
         }
       }
     },
@@ -53,7 +56,7 @@ async fn panicking_handler() -> impl IntoResponse {
   let (ctx, resp) = columbo::new();
 
   let panicking_suspend = ctx.suspend(
-    |_ctx| async move {
+    async move {
       tokio::time::sleep(Duration::from_secs(1)).await;
       panic!("I don't know! The programmer told me to panic!");
       #[allow(unreachable_code)]
@@ -92,8 +95,7 @@ async fn custom_panicking_handler() -> impl IntoResponse {
 
   // suspend a future, providing a future and a placeholder
   let panicking_suspense = ctx.suspend(
-    // takes a closure that returns a future, allowing nested suspense
-    |_ctx| async move {
+    async move {
       tokio::time::sleep(std::time::Duration::from_secs(2)).await;
       panic!("");
       #[allow(unreachable_code)]
@@ -127,7 +129,7 @@ async fn multi_suspended_handler(
   let suspense_items = (0..n)
     .map(|_| {
       ctx.suspend(
-        |_ctx| {
+        {
           let duration = Duration::from_millis(rng.generate_range(500..1500));
           async move {
             tokio::time::sleep(duration).await;
@@ -165,10 +167,13 @@ async fn manually_cancelled_handler() -> impl IntoResponse {
   let (ctx, resp) = columbo::new();
 
   let suspend = ctx.suspend(
-    |ctx| async move {
-      ctx.cancelled().await;
-      tracing::warn!("suspended future cancelled");
-      ""
+    {
+      let ctx = ctx.clone();
+      async move {
+        ctx.cancelled().await;
+        tracing::warn!("suspended future cancelled");
+        ""
+      }
     },
     "[loading]",
   );
@@ -197,7 +202,7 @@ async fn auto_cancelled_handler() -> impl IntoResponse {
   });
 
   let suspend = ctx.suspend(
-    |_ctx| async move {
+    async move {
       tokio::time::sleep(Duration::from_secs(10)).await;
       tracing::warn!("handler completed");
       html! { "[10 seconds later]" }

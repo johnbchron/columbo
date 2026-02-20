@@ -10,7 +10,7 @@ async fn suspend_and_stream() {
   let (ctx, resp) = crate::new();
 
   let suspense = ctx.suspend(
-    |_ctx| async { Html::new("<p>hello from strings</p>") },
+    async { Html::new("<p>hello from strings</p>") },
     "loading...",
   );
 
@@ -34,8 +34,7 @@ async fn suspend_and_stream() {
 async fn display_impl_renders_placeholder() {
   let (ctx, _resp) = crate::new();
 
-  let suspense =
-    ctx.suspend(|_| async { Html::new("result") }, "my placeholder");
+  let suspense = ctx.suspend(async { Html::new("result") }, "my placeholder");
 
   let rendered = format!("{suspense}");
   let doc = parse(&rendered);
@@ -49,8 +48,7 @@ async fn display_impl_renders_placeholder() {
 async fn render_to_html_method() {
   let (ctx, _resp) = crate::new();
 
-  let suspense =
-    ctx.suspend(|_ctx| async { Html::new("") }, "placeholder text");
+  let suspense = ctx.suspend(async { Html::new("") }, "placeholder text");
 
   let rendered = suspense.render_to_html().into_string();
   let doc = parse(&rendered);
@@ -74,7 +72,7 @@ async fn many_concurrent_suspensions() {
 
   for i in 0..20 {
     let marker = format!("item-{i}");
-    ctx.suspend(move |_| async move { Html::new(marker) }, "...");
+    ctx.suspend(async move { Html::new(marker) }, "...");
   }
 
   drop(ctx);
@@ -98,10 +96,12 @@ async fn nested_suspense() {
   let (ctx, resp) = crate::new();
 
   ctx.suspend(
-    |inner_ctx| async move {
-      inner_ctx
-        .suspend(|_| async { Html::new("nested-child") }, "child-loading");
-      Html::new("parent-result")
+    {
+      let ctx = ctx.clone();
+      async move {
+        ctx.suspend(async { Html::new("nested-child") }, "child-loading");
+        Html::new("parent-result")
+      }
     },
     "parent-loading",
   );

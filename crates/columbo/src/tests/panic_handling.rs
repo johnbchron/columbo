@@ -7,7 +7,7 @@ async fn default_panic_renderer() {
   let (ctx, resp) = crate::new();
 
   ctx.suspend(
-    |_| async {
+    async {
       panic!("something went wrong");
       #[allow(unreachable_code)]
       Html::new("")
@@ -33,7 +33,7 @@ async fn non_string_panic_payload() {
   let (ctx, resp) = crate::new();
 
   ctx.suspend(
-    |_| async {
+    async {
       std::panic::panic_any(42u32);
       #[allow(unreachable_code)]
       Html::new("")

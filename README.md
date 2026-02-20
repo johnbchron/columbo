@@ -26,9 +26,9 @@ So in summary:
 - Call [`into_stream()`](SuspendedResponse::into_stream) to setup your
   response stream.
 
-The [`suspend()`](SuspenseContext::suspend) function provides access to
-itself for the futures it suspends by taking a closure returning a future,
-so futures can spawn additional suspensions or listen for cancellation.
+To spawn nested suspensions or access the [`SuspenseContext`] from within a
+suspended future (e.g. to listen for cancellation), clone the context before
+the `async` block and capture it by move.
 
 Responses are streamed in completion order, not registration order, so the
 future that completes first will stream first.
@@ -57,8 +57,7 @@ async fn handler() -> impl IntoResponse {
 
   // suspend a future, providing a future and a placeholder
   let suspense = ctx.suspend(
-    // takes a closure that returns a future, allowing nested suspense
-    |_ctx| async move {
+    async move {
       tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
       // the future can return any type that implements Into<Html>
@@ -107,8 +106,7 @@ async fn handler() -> impl IntoResponse {
 
   // suspend a future, providing a future and a placeholder
   let panicking_suspense = ctx.suspend(
-    // takes a closure that returns a future, allowing nested suspense
-    |_ctx| async move {
+    async move {
       tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
       panic!("");
@@ -153,7 +151,7 @@ async fn handler() -> impl IntoResponse {
   let (ctx, resp) = columbo::new();
 
   let suspense = ctx.suspend(
-    |_ctx| async move {
+    async move {
       tokio::time::sleep(std::time::Duration::from_secs(1)).await;
       "<p>Done.</p>"
     },
@@ -187,7 +185,7 @@ async fn handler() -> impl IntoResponse {
   let (ctx, resp) = columbo::new();
 
   let suspense = ctx.suspend(
-    |_ctx| async move {
+    async move {
       tokio::time::sleep(std::time::Duration::from_secs(1)).await;
       html! { p { "Loaded!" } } // maud::Markup accepted directly
     },

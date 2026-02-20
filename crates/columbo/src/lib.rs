@@ -78,23 +78,24 @@ impl SuspenseContext {
     self.next_id.fetch_add(1, Ordering::Relaxed)
   }
 
-  /// Suspends async work and streams the result. This function takes a closure
-  /// that returns a future, allowing the future to spawn more suspensions. The
-  /// placeholder is sent immediately, while the future output is streamed and
-  /// replaces the placeholder in the browser.
+  /// Suspends async work and streams the result. The placeholder is sent
+  /// immediately, while the future output is streamed and replaces the
+  /// placeholder in the browser.
   ///
   /// The future can return any type that implements [`Into<Html>`], including
   /// `String`, `&str`, or types like `maud::Markup`.
   ///
+  /// To spawn nested suspensions from within the future, clone [`self`] before
+  /// the `async` block and capture it by move.
+  ///
   /// Suspended futures must be `Send` because they are handed to `tokio`.
   #[instrument(name = "columbo::suspend", skip_all, fields(suspense.id))]
-  pub fn suspend<F, Fut, M>(
+  pub fn suspend<Fut, M>(
     &self,
-    f: F,
+    fut: Fut,
     placeholder: impl Into<Html>,
   ) -> Suspense
   where
-    F: FnOnce(SuspenseContext) -> Fut,
     Fut: Future<Output = M> + Send + 'static,
     M: Into<Html> + 'static,
   {
@@ -104,7 +105,7 @@ impl SuspenseContext {
     tokio::spawn(
       self
         .clone()
-        .run_suspended(id, f(self.clone()))
+        .run_suspended(id, fut)
         .instrument(tracing::info_span!("columbo::suspended_task")),
     );
 

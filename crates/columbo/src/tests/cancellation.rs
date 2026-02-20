@@ -19,7 +19,7 @@ async fn manual_cancellation_via_cancelled_method() {
   let flag_clone = flag.clone();
 
   ctx.suspend(
-    move |_| async move {
+    async move {
       ctx_clone.cancelled().await;
       flag_clone.store(true, Ordering::SeqCst);
       Html::new("")
@@ -48,7 +48,7 @@ async fn auto_cancel_option() {
   });
 
   ctx.suspend(
-    move |_| async move {
+    async move {
       tokio::time::sleep(Duration::from_secs(10)).await;
       completed_clone.store(true, Ordering::SeqCst);
       Html::new("")
