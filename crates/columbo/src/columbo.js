@@ -5,7 +5,7 @@
 
   // Track templates waiting to be swapped in
   const pendingIds = new Set();
-  // Prevent scheduling multiple microtasks for the same batch
+  // Prevent scheduling multiple microtasks for the same batch of swaps
   let transitionScheduled = false;
 
   // Swap placeholder with template content and clean up
@@ -19,7 +19,7 @@
     }
   };
 
-  // Process all pending swaps in a single View Transition (if available)
+  // Process all pending swaps
   const processQueue = () => {
     transitionScheduled = false;
     
@@ -27,12 +27,7 @@
     const ids = Array.from(pendingIds);
     pendingIds.clear();
 
-    // Batch swaps in a View Transition for smooth updates
-    if (document.startViewTransition) {
-      document.startViewTransition(() => ids.forEach(performSwap));
-    } else {
-      ids.forEach(performSwap);
-    }
+    ids.forEach(performSwap);
   };
 
   // Watch for new template elements being added to the DOM
