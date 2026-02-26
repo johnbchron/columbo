@@ -1,60 +1,23 @@
-(function() {
-  // Only initialize once, even if this script appears multiple times in the DOM
+(() => {
+  // only initialize once, even if this script appears multiple times in the DOM
   if (window.__columbo) return;
   window.__columbo = true;
 
-  // Optional user config: window.__columboConfig = { swap: (placeholder, nodes) => { ... } }
-  const config = window.__columboConfig || {};
+  // optional: window.__columboConfig = { swap: (placeholder, nodes) => { ... } }
+  const {swap = (p, n) => p.replaceWith(...n)} = window.__columboConfig || {};
 
-  // Default swap: replace the placeholder span with the resolved nodes
-  const defaultSwap = (placeholder, nodes) => placeholder.replaceWith(...nodes);
-  const swapFn = typeof config.swap === 'function' ? config.swap : defaultSwap;
+  // watch for streamed <template data-columbo-r-id> elements and swap them in
+  new MutationObserver(mutations => {
+    for (const {addedNodes} of mutations)
+      for (const r of addedNodes) {
+        const id = r.dataset?.columboRId;
+        // ignore if not a replacement template
+        if (!id) continue;
 
-  // Track templates waiting to be swapped in
-  const pendingIds = new Set();
-  // Prevent scheduling multiple microtasks for the same batch of swaps
-  let transitionScheduled = false;
-
-  // Swap placeholder with template content and clean up
-  const performSwap = (id) => {
-    const p = document.querySelector(`[data-columbo-p-id="${id}"]`);
-    const r = document.querySelector(`[data-columbo-r-id="${id}"]`);
-    
-    if (p && r) {
-      swapFn(p, [...r.content.childNodes]);
-      r.remove();
-    }
-  };
-
-  // Process all pending swaps
-  const processQueue = () => {
-    transitionScheduled = false;
-    
-    // Snapshot and clear the queue
-    const ids = Array.from(pendingIds);
-    pendingIds.clear();
-
-    ids.forEach(performSwap);
-  };
-
-  // Watch for new template elements being added to the DOM
-  const observer = new MutationObserver((mutations) => {
-    for (const mutation of mutations) {
-      for (const node of mutation.addedNodes) {
-        // Check if this is a columbo replacement template
-        if (node.nodeType === 1 && node.hasAttribute('data-columbo-r-id')) {
-          pendingIds.add(node.getAttribute('data-columbo-r-id'));
-        }
+        // execute swap if placeholder exists, then delete replacement
+        const p = document.querySelector(`[data-columbo-p-id="${id}"]`);
+        if (p) swap(p, [...r.content.childNodes]);
+        r.remove();
       }
-    }
-
-    // Schedule processing if we have new templates and haven't already scheduled
-    if (pendingIds.size > 0 && !transitionScheduled) {
-      transitionScheduled = true;
-      queueMicrotask(processQueue);
-    }
-  });
-
-  // Observe the entire document to catch streamed chunks as they arrive
-  observer.observe(document.documentElement, { childList: true, subtree: true });
+  }).observe(document.documentElement, {childList: true, subtree: true});
 })();
