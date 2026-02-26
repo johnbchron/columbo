@@ -3,6 +3,13 @@
   if (window.__columbo) return;
   window.__columbo = true;
 
+  // Optional user config: window.__columboConfig = { swap: (placeholder, nodes) => { ... } }
+  const config = window.__columboConfig || {};
+
+  // Default swap: replace the placeholder span with the resolved nodes
+  const defaultSwap = (placeholder, nodes) => placeholder.replaceWith(...nodes);
+  const swapFn = typeof config.swap === 'function' ? config.swap : defaultSwap;
+
   // Track templates waiting to be swapped in
   const pendingIds = new Set();
   // Prevent scheduling multiple microtasks for the same batch of swaps
@@ -14,7 +21,7 @@
     const r = document.querySelector(`[data-columbo-r-id="${id}"]`);
     
     if (p && r) {
-      p.replaceWith(...r.content.childNodes);
+      swapFn(p, [...r.content.childNodes]);
       r.remove();
     }
   };

@@ -203,6 +203,60 @@ async fn handler() -> impl IntoResponse {
 }
 ```
 
+## Client-side Configuration
+
+Columbo injects a small script that watches for streamed `<template>` elements
+and swaps them into their placeholders. You can customize how swaps are
+performed by setting `window.__columboConfig` **before** the columbo script
+runs:
+
+```html
+<script>
+  window.__columboConfig = {
+    // placeholder: the <span> wrapping the original placeholder content
+    // nodes: array of resolved DOM nodes to swap in
+    swap: (placeholder, nodes) => {
+      placeholder.replaceWith(...nodes);
+    }
+  };
+</script>
+```
+
+The `swap` function receives the placeholder `<span>` element and an array of
+resolved nodes. The default behavior is `placeholder.replaceWith(...nodes)`.
+
+This hook covers any use case without further API surface:
+
+```js
+// Opt into View Transitions for smooth swaps
+window.__columboConfig = {
+  swap: (placeholder, nodes) => {
+    if (document.startViewTransition) {
+      document.startViewTransition(() => placeholder.replaceWith(...nodes));
+    } else {
+      placeholder.replaceWith(...nodes);
+    }
+  }
+};
+
+// Use morphdom for minimal DOM diffing
+window.__columboConfig = {
+  swap: (placeholder, nodes) => {
+    const wrapper = document.createElement('div');
+    nodes.forEach(n => wrapper.appendChild(n));
+    morphdom(placeholder, wrapper.innerHTML);
+  }
+};
+
+// Add a CSS class for a fade-in animation
+window.__columboConfig = {
+  swap: (placeholder, nodes) => {
+    nodes.forEach(n => n.classList?.add('columbo-reveal'));
+    placeholder.replaceWith(...nodes);
+  }
+};
+```
+
 ## Architecture
 
 Internally, [`SuspenseContext`] holds a channel sender. When
