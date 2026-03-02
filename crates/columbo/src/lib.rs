@@ -9,15 +9,7 @@ mod resp_adapter;
 #[cfg(test)]
 mod tests;
 
-use std::{
-  any::Any,
-  fmt,
-  panic::AssertUnwindSafe,
-  sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
-  },
-};
+use std::{any::Any, fmt, panic::AssertUnwindSafe, sync::Arc};
 
 use futures::FutureExt;
 pub use html::Html;
@@ -28,7 +20,7 @@ use tracing::{Instrument, Span, debug, instrument, trace, warn};
 pub use self::format::GLOBAL_SCRIPT_CONTENTS;
 use self::{cancel_on_drop::CancelOnDrop, html_stream::HtmlStream};
 
-type Id = usize;
+type Id = ulid::Ulid;
 
 /// Creates a new [`SuspenseContext`] and [`SuspendedResponse`]. The context is
 /// for suspending futures, and the response turns into an output stream.
@@ -50,7 +42,6 @@ pub fn new_with_opts(
   debug!("created new suspense context and response");
   (
     SuspenseContext {
-      next_id: Arc::new(AtomicUsize::new(0)),
       tx,
       opts: opts.clone(),
       cancel: cancel.clone(),
@@ -66,17 +57,13 @@ pub fn new_with_opts(
 /// The context with which you can create suspense boundaries for futures.
 #[derive(Clone)]
 pub struct SuspenseContext {
-  next_id: Arc<AtomicUsize>,
-  tx:      mpsc::UnboundedSender<Html>,
-  opts:    Arc<ColumboOptions>,
-  cancel:  CancellationToken,
+  tx:     mpsc::UnboundedSender<Html>,
+  opts:   Arc<ColumboOptions>,
+  cancel: CancellationToken,
 }
 
 impl SuspenseContext {
-  fn new_id(&self) -> Id {
-    // IDs don't need to be sequential, only unique
-    self.next_id.fetch_add(1, Ordering::Relaxed)
-  }
+  fn new_id() -> Id { ulid::Ulid::new() }
 
   /// Suspends async work and streams the result. The placeholder is sent
   /// immediately, while the future output is streamed and replaces the
@@ -99,7 +86,7 @@ impl SuspenseContext {
     Fut: Future<Output = M> + Send + 'static,
     M: Into<Html> + 'static,
   {
-    let id = self.new_id();
+    let id = Self::new_id();
     Span::current().record("suspense.id", id.to_string());
 
     tokio::spawn(
